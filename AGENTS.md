@@ -21,13 +21,13 @@
 **Step 4**: B+-tree MemTable index, contiguous-page design, blob values, prefix compression scaffold.
 **Step 5**: SSTable v4 with bloom filter + range filter + Snappy compression + block index + range scan.
 
-## Current Status: Step 5 (in progress)
+## Current Status: Step 5 (complete)
 
 ### MemTable
-- **B+-tree** (contiguous-page): `LeafPage` 4KB `_aligned_malloc`, `alignas(4096)`. Slotted page: slot directory (14B/entry) + inline records. Linked leaf chain for O(n) ordered export.
+- **B+-tree** (contiguous-page): `LeafPage` 4KB `_aligned_malloc`, `alignas(4096)`. Slotted page: slot directory (14B/entry) + inline records. Linked leaf chain for O(n) ordered export. `MemTableWalk` skips leaves with `count=0` (can occur after splits). `Free()` returns 0 when `data_start < slot_end` to prevent unsigned wrap-around.
 - **Internal nodes**: `std::vector`-based (keys, children, child_leaves), fanout 16.
 - **Blob values**: `> page/2` stored as `[size:8B][data]` external blob. Pointer stored inline.
-- **MVCC**: `Find()` returns leftmost match; new versions inserted left (`[newest, ..., oldest]`). `Lookup()` scans right for first visible timestamp.
+- **MVCC**: `Find()` returns leftmost match; new versions inserted left (`[newest, ..., oldest]`). `Lookup()` scans right for first visible timestamp. `memory_usage_` tracks physical entries (including old versions) so `IsFull()` triggers correctly.
 - Prefix compression scaffold (`prefix`, `FullKey()` — activation pending).
 
 ### SSTable v4
@@ -37,6 +37,7 @@
 - **Range filter**: `min_key` / `max_key` — `key < min || key > max → skip`.
 - **Compression**: `kCompressionSnappy` active — hash-based LZ77, ~2x ratio, block-level.
 - **Entry format**: `[KeyLen:4B][Key][ValueLen:4B][Value][Timestamp:8B]` — CRC covers full entry.
+- **Export dedup**: `WriteFromWalk` picks the highest-timestamp version for each key across leaf boundaries (MVCC versions may span multiple leaves after splits).
 
 ### WAL
 - `Buffer(key, value, ts)` → in-memory buffer (non-blocking). `Sync()` → fsync, returns batch seq.
@@ -118,6 +119,5 @@ keyvaluedb/
 ## Pending Steps (DO NOT start unless user explicitly asks)
 | Step | Feature | Status |
 |------|---------|--------|
-| 5 | Range scan / iterator | **Done** |
 | 6 | Compaction (level-based SSTable merging) | Not started |
 | 7 | Atomicity / batch writes | Not started |

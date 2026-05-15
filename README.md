@@ -1,6 +1,6 @@
 # KVDB — LSM-Tree Key-Value Storage Engine
 
-A from-scratch C++17 implementation of a log-structured merge-tree (LSM-tree) key-value database engine. Currently implements **Step 1**: in-memory write buffer (MemTable) with automatic asynchronous flush to immutable on-disk SSTable files.
+A from-scratch C++17 implementation of a log-structured merge-tree (LSM-tree) key-value database engine with MVCC, WAL, B+-tree memtable, SSTable v4, TCP server/client, and range scans.
 
 ## Build
 
@@ -60,10 +60,11 @@ engine.WaitForPendingFlushes();
 
 ### Write Path
 
-1. `Insert(key, value)` writes to the in-memory **MemTable** (`std::map`, sorted by key)
-2. When MemTable reaches 4 MB (`kDefaultMemTableMaxBytes`), it is **frozen** (made immutable) and a new empty MemTable takes its place
-3. The frozen MemTable is **asynchronously flushed** to a binary **SSTable** file (`kvdb_data/sstable_N.sst`) on a background thread
-4. SSTable files pile up sequentially — compaction is deferred to a later step
+ 1. `Insert(key, value)` writes to the in-memory **MemTable** (B+-tree, sorted by key)
+ 2. When MemTable reaches the size limit, it is **frozen** and a new MemTable takes its place
+ 3. The frozen MemTable is **flushed** to a binary **SSTable** file synchronously
+ 4. SSTable files are tracked in the **MANIFEST**; WAL ensures crash recovery
+ 5. Point lookups scan MemTables then SSTables newest-first with bloom/range filters
 
 ### File Format (v2)
 
@@ -85,19 +86,26 @@ SSTable files use a **block-structured binary layout** with per-block CRC32 chec
 
 ## Project Status
 
-| Feature          | Status      |
-|------------------|-------------|
-| MemTable insert  | Done        |
-| MemTable freeze  | Done        |
-| Async SSTable flush | Done     |
-| Backpressure (tunable) | Done  |
-| Per-block CRC32  | Done        |
-| Thread safety    | Done        |
-| WAL              | Pending     |
-| Compaction       | Pending     |
-| Point lookup     | Pending     |
-| Range scan       | Pending     |
-| Bloom filter     | Pending     |
+| Feature              | Status      |
+|----------------------|-------------|
+| MemTable insert      | Done        |
+| MemTable freeze      | Done        |
+| Async SSTable flush  | Done        |
+| Backpressure         | Done        |
+| Per-block CRC32      | Done        |
+| Thread safety        | Done        |
+| WAL + Recovery       | Done        |
+| MVCC point lookup    | Done        |
+| B+-tree MemTable     | Done        |
+| Bloom filter         | Done        |
+| Range filter         | Done        |
+| Snappy compression   | Done        |
+| Range scan           | Done        |
+| TCP Server/Client    | Done        |
+| Manifest (catalog)   | Done        |
+| Fuzz test (recovery) | Done        |
+| Compaction           | Pending     |
+| Batch writes         | Pending     |
 
 ## Documentation
 
