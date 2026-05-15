@@ -21,7 +21,7 @@
 **Step 4**: B+-tree MemTable index, contiguous-page design, blob values, prefix compression scaffold.
 **Step 5**: SSTable v4 with bloom filter + range filter + Snappy compression + block index + range scan.
 
-## Current Status: Step 5 (complete)
+## Current Status: Step 6 (in progress)
 
 ### MemTable
 - **B+-tree** (contiguous-page): `LeafPage` 4KB `_aligned_malloc`, `alignas(4096)`. Slotted page: slot directory (14B/entry) + inline records. Linked leaf chain for O(n) ordered export. `MemTableWalk` skips leaves with `count=0` (can occur after splits). `Free()` returns 0 when `data_start < slot_end` to prevent unsigned wrap-around.
@@ -56,6 +56,14 @@
 - **Concurrency**: Reader-writer lock (`shared_mutex`) on memtable. Single writer thread. MVCC snapshot reads.
 - **Backpressure**: Write queue byte-capped (16MB). Timestamps: `global_ts_` monotonic counter, key cap 1KB, KV cap 4MB.
 - **MemTable Recycling**: After flush, memtable kept in `frozen_memtables_` with a `fence_ts`. `DrainRecyclePending()` checks `SnapshotTracker::MinActiveTS() >= fence_ts` — when all active readers see the SSTable, the memtable is unlinked and released.
+
+### Compaction
+- **Tombstones**: `Delete(key)` inserts an entry with empty value (tombstone). Tombstones survive flushes; `Lookup` returns false for tombstone entries.
+- **Leveling strategy**: Level 0 (flushes, can overlap). Levels 1+ (non-overlapping sorted runs). Threshold: 8 SSTables triggers compaction.
+- **Size multiplier**: 10× per level. Base SSTable size: 4MB. SSTables split when approaching level max size.
+- **Background worker**: `CompactionWorkerLoop` periodically scans levels. Compaction merges SSTables from level L into L+1, picks newest version per key, drops tombstones at the last level.
+- **Visibility**: New SSTables are written, manifest is updated atomically (remove old, add new), old files are garbage-collected.
+- **Concurrency**: Compaction uses `sstable_metadata_mutex_` for atomic swap. Flush worker writes to Level 0 concurrently.
 
 ### Server/Client
 - TCP server: connection-per-client threads, single writer queue, concurrent reads via MVCC.
@@ -119,5 +127,5 @@ keyvaluedb/
 ## Pending Steps (DO NOT start unless user explicitly asks)
 | Step | Feature | Status |
 |------|---------|--------|
-| 6 | Compaction (level-based SSTable merging) | Not started |
+| 6 | Compaction (level-based SSTable merging) | **Done** |
 | 7 | Atomicity / batch writes | Not started |
