@@ -1,6 +1,7 @@
 #include "kvdb/sstable.hpp"
 #include "kvdb/config.hpp"
 #include "kvdb/internal/crc32.hpp"
+#include "kvdb/iterator.hpp"
 #include "kvdb/snappy.hpp"
 
 #include <cstring>
@@ -329,68 +330,71 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
                       bool is_last_level,
                       std::vector<Metadata>& outputs,
                       std::vector<std::string>& garbage_files) {
-    struct MergeSource {
-        std::vector<KeyValuePair> entries;
-        size_t pos = 0;
-        bool Valid() const { return pos < entries.size(); }
-        const KeyValuePair& Current() const { return entries[pos]; }
-        void Next() { ++pos; }
+    struct MergeSrc {
+        std::unique_ptr<SSTableIterator> iter;
+        KeyValuePair cur;
+        MergeSrc(std::unique_ptr<SSTableIterator> i) : iter(std::move(i)) {
+            if (iter->Valid()) cur = iter->Current();
+        }
+        bool Valid() const { return iter->Valid(); }
+        const KeyValuePair& Current() const { return cur; }
+        void Next() { iter->Next(); if (iter->Valid()) cur = iter->Current(); }
     };
-    std::vector<MergeSource> sources;
+    std::vector<MergeSrc> sources;
     for (auto& in : inputs) {
-        MergeSource src;
-        try { src.entries = SSTable::ReadAll(in.filepath); }
-        catch (...) { continue; }
-        if (!src.entries.empty()) sources.push_back(std::move(src));
+        auto it = std::make_unique<SSTableIterator>(in.filepath);
+        if (it->Valid()) sources.emplace_back(std::move(it));
     }
+    if (sources.empty()) return;
 
-    std::vector<KeyValuePair> merged;
-    while (true) {
-        int best_idx = -1;
-        for (size_t i = 0; i < sources.size(); ++i) {
-            if (!sources[i].Valid()) continue;
-            if (best_idx < 0 || sources[i].Current().key < sources[static_cast<size_t>(best_idx)].Current().key)
-                best_idx = static_cast<int>(i);
-        }
-        if (best_idx < 0) break;
-
-        std::string key = sources[static_cast<size_t>(best_idx)].Current().key;
-        KeyValuePair best = sources[static_cast<size_t>(best_idx)].Current();
-        sources[static_cast<size_t>(best_idx)].Next();
-
-        for (size_t i = 0; i < sources.size(); ++i) {
-            while (sources[i].Valid() && sources[i].Current().key == key) {
-                if (sources[i].Current().timestamp > best.timestamp)
-                    best = sources[i].Current();
-                sources[i].Next();
+    auto nextKey = [&]() -> KeyValuePair {
+        while (true) {
+            int best = -1;
+            for (size_t i = 0; i < sources.size(); ++i) {
+                if (!sources[i].Valid()) continue;
+                if (best < 0 || sources[i].Current().key < sources[best].Current().key)
+                    best = static_cast<int>(i);
             }
+            if (best < 0) return {"", "", 0, false};
+
+            std::string key = sources[best].Current().key;
+            KeyValuePair winner = sources[best].Current();
+            sources[best].Next();
+
+            for (size_t i = 0; i < sources.size(); ++i) {
+                while (sources[i].Valid() && sources[i].Current().key == key) {
+                    if (sources[i].Current().timestamp > winner.timestamp)
+                        winner = sources[i].Current();
+                    sources[i].Next();
+                }
+            }
+            if (winner.is_tombstone && is_last_level) continue;
+            return winner;
         }
+    };
 
-        if (best.is_tombstone && is_last_level) continue;
-        merged.push_back(std::move(best));
-    }
-
-    if (merged.empty()) return;
-
-    size_t approx = 0;
-    std::vector<KeyValuePair> batch;
     uint64_t seq = output_seq_start;
+    std::vector<KeyValuePair> batch;
+    size_t approx = 0;
 
-    for (auto& kv : merged) {
+    for (;;) {
+        KeyValuePair kv = nextKey();
+        if (kv.key.empty()) break;
+
         size_t es = kv.key.size() + kv.value.size() + 24;
         if (!batch.empty() && approx + es > max_sstable_size) {
             std::ostringstream oss;
-            oss << output_dir << "/sstable_" << seq << ".sst";
+            oss << output_dir << "/sstable_" << seq++ << ".sst";
             std::string fpath = oss.str();
             SSTable::Write(fpath, batch);
-            Metadata meta = SSTable::ReadMetadata(fpath);
+            Metadata meta = ReadMetadata(fpath);
             meta.filepath = fpath;
             meta.level = output_level;
             outputs.push_back(std::move(meta));
             batch.clear();
             approx = 0;
         }
-        batch.push_back(kv);
+        batch.push_back(std::move(kv));
         approx += es;
     }
 
@@ -399,7 +403,7 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
         oss << output_dir << "/sstable_" << seq << ".sst";
         std::string fpath = oss.str();
         SSTable::Write(fpath, batch);
-        Metadata meta = SSTable::ReadMetadata(fpath);
+        Metadata meta = ReadMetadata(fpath);
         meta.filepath = fpath;
         meta.level = output_level;
         outputs.push_back(std::move(meta));

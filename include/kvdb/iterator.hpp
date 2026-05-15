@@ -114,6 +114,7 @@ private:
         current.value.assign(block_data.data() + block_pos, vl); block_pos += vl;
         current.timestamp = 0;
         for (int b=0;b<8;++b) current.timestamp |= uint64_t(uint8_t(block_data[block_pos++]))<<(b*8);
+        current.is_tombstone = current.value.empty();
     }
 
     static void DecompressBlock(uint8_t comp, std::string& data) {
@@ -152,6 +153,9 @@ public:
     void Next() { FindNext(); }
     const std::string& Key() const { return current_.key; }
     const std::string& Value() const { return current_.value; }
+    uint64_t Timestamp() const { return current_.timestamp; }
+    bool IsTombstone() const { return current_.is_tombstone; }
+    const KeyValuePair& CurrentPair() const { return current_; }
 
 private:
     void FindNext() {

@@ -562,7 +562,6 @@ void LSMTreeEngine::CompactLevel(int from_level) {
     if (to_level > static_cast<int>(Config::kMaxLevel)) return;
 
     std::vector<SSTable::Metadata> inputs;
-    std::vector<SSTable::Metadata> overlap;
     std::string min_k, max_k;
 
     for (auto& m : snapshot) {
@@ -574,20 +573,20 @@ void LSMTreeEngine::CompactLevel(int from_level) {
     }
     if (inputs.empty()) return;
 
+    std::vector<SSTable::Metadata> overlap;
     for (auto& m : snapshot) {
-        if (m.level == to_level) {
-            bool overlaps = (m.max_key >= min_k && m.min_key <= max_k);
-            if (overlaps) overlap.push_back(m);
+        if (m.level == to_level && !m.min_key.empty() && !m.max_key.empty()) {
+            if (m.max_key >= min_k && m.min_key <= max_k)
+                overlap.push_back(m);
         }
     }
     inputs.insert(inputs.end(), overlap.begin(), overlap.end());
-
-    uint64_t start_seq = sstable_seq_.fetch_add(static_cast<uint64_t>(inputs.size() + 10));
 
     size_t max_sst_size = Config::kLevelBaseSSTableSize;
     for (int l = 1; l <= to_level; ++l) max_sst_size *= Config::kLevelSizeMultiplier;
     bool is_last = (to_level == static_cast<int>(Config::kMaxLevel));
 
+    uint64_t start_seq = sstable_seq_.fetch_add(64);
     std::vector<SSTable::Metadata> outputs;
     std::vector<std::string> garbage;
     SSTable::Compact(inputs, data_dir_, start_seq, to_level,
@@ -604,14 +603,10 @@ void LSMTreeEngine::CompactLevel(int from_level) {
         for (auto& out : outputs) all.push_back(out);
     }
 
-    for (auto& in : inputs) {
+    for (auto& in : inputs)
         manifest_->RemoveSSTable(sstable_seq_.load());
-        manifest_->Sync();
-    }
-    for (auto& out : outputs) {
-        uint64_t seq = sstable_seq_.fetch_add(1);
-        manifest_->AddSSTable(seq, out);
-    }
+    for (auto& out : outputs)
+        manifest_->AddSSTable(sstable_seq_.fetch_add(1), out);
     manifest_->Sync();
 
     for (auto& f : garbage) {
