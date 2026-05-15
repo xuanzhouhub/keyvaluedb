@@ -322,6 +322,53 @@ void TestWriteFromWalkPicksNewestTS() {
     ASSERT_STREQ("v2", v);
 }
 
+void TestWriteFromWalkWithBlobs() {
+    std::filesystem::remove_all("./test_sstable_data");
+    std::filesystem::create_directories("./test_sstable_data");
+
+    kvdb::BPlusTree tree;
+    std::string small_val("small");
+    std::string blob1(3000, 'A');
+    std::string blob2(10000, 'B');
+    std::string blob3(5000, 'C');
+    std::string huge_blob(1024 * 1024, 'Z');
+
+    tree.Insert("alpha", small_val, 1);
+    tree.Insert("bravo", blob1, 2);
+    tree.Insert("charlie", blob2, 3);
+    tree.Insert("delta", small_val, 5);
+    tree.Insert("delta", blob3, 10);
+
+    tree.Insert("echo", huge_blob, 20);
+
+    kvdb::BPlusTree::MemTableWalk walk(tree);
+    std::string filepath = "./test_sstable_data/blob.sst";
+    kvdb::SSTable::WriteFromWalk(filepath, walk, tree.Size());
+
+    auto entries = kvdb::SSTable::ReadAll(filepath);
+    ASSERT_EQ(5u, entries.size());
+
+    std::string v;
+    ASSERT_TRUE(kvdb::SSTable::LookupKey(filepath, "alpha", 99, v));
+    ASSERT_STREQ(small_val, v);
+
+    ASSERT_TRUE(kvdb::SSTable::LookupKey(filepath, "bravo", 99, v));
+    ASSERT_STREQ(blob1, v);
+
+    ASSERT_TRUE(kvdb::SSTable::LookupKey(filepath, "charlie", 99, v));
+    ASSERT_STREQ(blob2, v);
+
+    ASSERT_TRUE(kvdb::SSTable::LookupKey(filepath, "delta", 99, v));
+    ASSERT_STREQ(blob3, v);
+
+    ASSERT_TRUE(kvdb::SSTable::LookupKey(filepath, "echo", 99, v));
+    ASSERT_STREQ(huge_blob, v);
+    ASSERT_EQ(1024u * 1024u, v.size());
+
+    auto meta = kvdb::SSTable::ReadMetadata(filepath);
+    ASSERT_EQ(5u, meta.entry_count);
+}
+
 void RunTests() {
     std::cout << "Running SSTable Tests...\n\n";
 
@@ -341,6 +388,7 @@ void RunTests() {
     TestRangeFilter();
     TestSnappyRoundTrip();
     TestWriteFromWalkPicksNewestTS();
+    TestWriteFromWalkWithBlobs();
 }
 
 } // namespace kvdb_test
