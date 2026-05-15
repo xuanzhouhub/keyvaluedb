@@ -362,7 +362,12 @@ inline void BPlusTree::Export(std::vector<KeyValuePair>& out) const {
             } else {
                 v.assign(leaf->Rec(i) + leaf->KeyLen(i), leaf->ValLen(i));
             }
-            out.push_back({std::move(k), std::move(v), leaf->Timestamp(i)});
+            KeyValuePair kv;
+            kv.key = std::move(k);
+            kv.value = std::move(v);
+            kv.timestamp = leaf->Timestamp(i);
+            kv.is_tombstone = kv.value.empty();
+            out.push_back(std::move(kv));
         }
 }
 
@@ -397,6 +402,7 @@ inline void BPlusTree::MemTableWalk::Load() {
         current_.value.assign(leaf_->Rec(pos_) + leaf_->KeyLen(pos_), vl);
     }
     current_.timestamp = leaf_->Timestamp(pos_);
+    current_.is_tombstone = current_.value.empty();
 }
 
 } // namespace kvdb

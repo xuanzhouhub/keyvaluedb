@@ -36,6 +36,14 @@ struct kvdb::FlushState {
     LSMTreeEngine* engine = nullptr;
 };
 
+struct kvdb::CompactionState {
+    std::thread worker;
+    std::mutex mtx;
+    std::condition_variable cv;
+    std::atomic<bool> should_stop{false};
+    LSMTreeEngine* engine = nullptr;
+};
+
 static void SyncWorkerLoop(kvdb::EngineSyncState* s) {
     while (!s->should_stop.load()) {
         {
@@ -99,6 +107,44 @@ void LSMTreeEngine::FlushWorkerLoop() {
     }
 }
 
+void LSMTreeEngine::CompactionWorkerLoop() {
+    while (!compaction_->should_stop.load()) {
+        {
+            std::unique_lock<std::mutex> lock(compaction_->mtx);
+            compaction_->cv.wait_for(lock, std::chrono::seconds(2), [this] {
+                return compaction_->should_stop.load();
+            });
+        }
+        if (compaction_->should_stop.load()) break;
+
+        std::vector<SSTable::Metadata> snapshot;
+        {
+            std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+            snapshot = sstable_metadata_;
+        }
+
+        std::vector<size_t> counts(Config::kMaxLevel + 1, 0);
+        for (auto& m : snapshot) {
+            int lvl = m.level;
+            if (lvl >= 0 && lvl <= static_cast<int>(Config::kMaxLevel))
+                counts[static_cast<size_t>(lvl)]++;
+        }
+
+        int trigger = -1;
+        for (int lvl = 0; lvl <= static_cast<int>(Config::kMaxLevel); ++lvl) {
+            if (counts[static_cast<size_t>(lvl)] >= Config::kDefaultCompactionThreshold) {
+                trigger = lvl;
+                break;
+            }
+        }
+        if (trigger < 0) continue;
+
+        try {
+            CompactLevel(trigger);
+        } catch (...) {}
+    }
+}
+
 LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_bytes, size_t max_pending_flushes)
     : data_dir_(data_dir)
     , memtable_max_bytes_(memtable_max_bytes)
@@ -132,9 +178,21 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
     flush_ = std::make_unique<FlushState>();
     flush_->engine = this;
     flush_->worker = std::thread([this]() { this->FlushWorkerLoop(); });
+
+    compaction_ = std::make_unique<CompactionState>();
+    compaction_->engine = this;
+    compaction_->worker = std::thread([this]() { this->CompactionWorkerLoop(); });
 }
 
 LSMTreeEngine::~LSMTreeEngine() {
+    if (compaction_) {
+        compaction_->should_stop = true;
+        compaction_->cv.notify_one();
+        if (compaction_->worker.joinable()) {
+            compaction_->worker.join();
+        }
+    }
+
     if (flush_) {
         flush_->should_stop = true;
         flush_->cv.notify_one();
@@ -261,6 +319,10 @@ void LSMTreeEngine::Insert(const std::string& key, const std::string& value) {
     DrainRecyclePending();
 }
 
+void LSMTreeEngine::Delete(const std::string& key) {
+    Insert(key, "");
+}
+
 bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const {
     uint64_t read_ts = global_ts_.load();
     tracker_.Acquire(read_ts);
@@ -274,11 +336,13 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
     {
         std::shared_lock<std::shared_mutex> lock(memtable_mutex_);
         if (active_memtable_->Lookup(key, read_ts, value_out)) {
+            if (value_out.empty()) return false;
             return true;
         }
         for (auto it = frozen_memtables_.rbegin();
              it != frozen_memtables_.rend(); ++it) {
             if ((*it)->Lookup(key, read_ts, value_out)) {
+                if (value_out.empty()) return false;
                 return true;
             }
         }
@@ -306,7 +370,10 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
         if (it->bloom.BitCount() > 0 && !it->bloom.MightContain(key)) continue;
 
         try {
-            if (SSTable::LookupKey(it->filepath, key, read_ts, value_out)) return true;
+            if (SSTable::LookupKey(it->filepath, key, read_ts, value_out)) {
+                if (value_out.empty()) return false;
+                return true;
+            }
         } catch (const std::exception&) {
             continue;
         }
@@ -481,6 +548,75 @@ void LSMTreeEngine::DrainRecyclePending() {
             if (it != frozen_memtables_.end())
                 frozen_memtables_.erase(it);
         }
+    }
+}
+
+void LSMTreeEngine::CompactLevel(int from_level) {
+    std::vector<SSTable::Metadata> snapshot;
+    {
+        std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+        snapshot = sstable_metadata_;
+    }
+
+    int to_level = from_level + 1;
+    if (to_level > static_cast<int>(Config::kMaxLevel)) return;
+
+    std::vector<SSTable::Metadata> inputs;
+    std::vector<SSTable::Metadata> overlap;
+    std::string min_k, max_k;
+
+    for (auto& m : snapshot) {
+        if (m.level == from_level) {
+            inputs.push_back(m);
+            if (min_k.empty() || m.min_key < min_k) min_k = m.min_key;
+            if (max_k.empty() || m.max_key > max_k) max_k = m.max_key;
+        }
+    }
+    if (inputs.empty()) return;
+
+    for (auto& m : snapshot) {
+        if (m.level == to_level) {
+            bool overlaps = (m.max_key >= min_k && m.min_key <= max_k);
+            if (overlaps) overlap.push_back(m);
+        }
+    }
+    inputs.insert(inputs.end(), overlap.begin(), overlap.end());
+
+    uint64_t start_seq = sstable_seq_.fetch_add(static_cast<uint64_t>(inputs.size() + 10));
+
+    size_t max_sst_size = Config::kLevelBaseSSTableSize;
+    for (int l = 1; l <= to_level; ++l) max_sst_size *= Config::kLevelSizeMultiplier;
+    bool is_last = (to_level == static_cast<int>(Config::kMaxLevel));
+
+    std::vector<SSTable::Metadata> outputs;
+    std::vector<std::string> garbage;
+    SSTable::Compact(inputs, data_dir_, start_seq, to_level,
+                     max_sst_size, is_last, outputs, garbage);
+
+    {
+        std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+        auto& all = sstable_metadata_;
+        for (auto& in : inputs) {
+            all.erase(std::remove_if(all.begin(), all.end(),
+                [&](const SSTable::Metadata& m) { return m.filepath == in.filepath; }),
+                all.end());
+        }
+        for (auto& out : outputs) all.push_back(out);
+    }
+
+    for (auto& in : inputs) {
+        manifest_->RemoveSSTable(sstable_seq_.load());
+        manifest_->Sync();
+    }
+    for (auto& out : outputs) {
+        uint64_t seq = sstable_seq_.fetch_add(1);
+        manifest_->AddSSTable(seq, out);
+    }
+    manifest_->Sync();
+
+    for (auto& f : garbage) {
+        std::error_code ec;
+        std::filesystem::remove(f, ec);
     }
 }
 

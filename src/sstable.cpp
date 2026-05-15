@@ -266,7 +266,7 @@ std::vector<KeyValuePair> SSTable::ReadAll(const std::string& filepath) {
         std::istringstream bs(std::string(cbuf.begin(),cbuf.end()));
         auto r32=[&](){uint32_t v=0;v|=uint8_t(bs.get());v|=uint8_t(bs.get())<<8;v|=uint8_t(bs.get())<<16;v|=uint8_t(bs.get())<<24;return v;};
         uint32_t n=r32();
-        for(uint32_t i=0;i<n;++i){uint32_t kl=r32();std::string k(kl,0);bs.read(&k[0],kl);uint32_t vl=r32();std::string v(vl,0);bs.read(&v[0],vl);uint64_t ts=0;for(int b=0;b<8;++b)ts|=static_cast<uint64_t>(static_cast<uint8_t>(bs.get()))<<(b*8);entries.push_back({std::move(k),std::move(v),ts});}
+        for(uint32_t i=0;i<n;++i){uint32_t kl=r32();std::string k(kl,0);bs.read(&k[0],kl);uint32_t vl=r32();std::string v(vl,0);bs.read(&v[0],vl);uint64_t ts=0;for(int b=0;b<8;++b)ts|=static_cast<uint64_t>(static_cast<uint8_t>(bs.get()))<<(b*8);entries.push_back({std::move(k),std::move(v),ts,v.empty()});}
     }
     return entries;
 }
@@ -319,6 +319,93 @@ uint64_t SSTable::ReadUint64LE(std::istream& is) {
     v|=static_cast<uint64_t>(static_cast<uint8_t>(is.get()))<<40;
     v|=static_cast<uint64_t>(static_cast<uint8_t>(is.get()))<<48;
     v|=static_cast<uint64_t>(static_cast<uint8_t>(is.get()))<<56;return v;
+}
+
+void SSTable::Compact(const std::vector<Metadata>& inputs,
+                      const std::string& output_dir,
+                      uint64_t output_seq_start,
+                      int output_level,
+                      size_t max_sstable_size,
+                      bool is_last_level,
+                      std::vector<Metadata>& outputs,
+                      std::vector<std::string>& garbage_files) {
+    struct MergeSource {
+        std::vector<KeyValuePair> entries;
+        size_t pos = 0;
+        bool Valid() const { return pos < entries.size(); }
+        const KeyValuePair& Current() const { return entries[pos]; }
+        void Next() { ++pos; }
+    };
+    std::vector<MergeSource> sources;
+    for (auto& in : inputs) {
+        MergeSource src;
+        try { src.entries = SSTable::ReadAll(in.filepath); }
+        catch (...) { continue; }
+        if (!src.entries.empty()) sources.push_back(std::move(src));
+    }
+
+    std::vector<KeyValuePair> merged;
+    while (true) {
+        int best_idx = -1;
+        for (size_t i = 0; i < sources.size(); ++i) {
+            if (!sources[i].Valid()) continue;
+            if (best_idx < 0 || sources[i].Current().key < sources[static_cast<size_t>(best_idx)].Current().key)
+                best_idx = static_cast<int>(i);
+        }
+        if (best_idx < 0) break;
+
+        std::string key = sources[static_cast<size_t>(best_idx)].Current().key;
+        KeyValuePair best = sources[static_cast<size_t>(best_idx)].Current();
+        sources[static_cast<size_t>(best_idx)].Next();
+
+        for (size_t i = 0; i < sources.size(); ++i) {
+            while (sources[i].Valid() && sources[i].Current().key == key) {
+                if (sources[i].Current().timestamp > best.timestamp)
+                    best = sources[i].Current();
+                sources[i].Next();
+            }
+        }
+
+        if (best.is_tombstone && is_last_level) continue;
+        merged.push_back(std::move(best));
+    }
+
+    if (merged.empty()) return;
+
+    size_t approx = 0;
+    std::vector<KeyValuePair> batch;
+    uint64_t seq = output_seq_start;
+
+    for (auto& kv : merged) {
+        size_t es = kv.key.size() + kv.value.size() + 24;
+        if (!batch.empty() && approx + es > max_sstable_size) {
+            std::ostringstream oss;
+            oss << output_dir << "/sstable_" << seq << ".sst";
+            std::string fpath = oss.str();
+            SSTable::Write(fpath, batch);
+            Metadata meta = SSTable::ReadMetadata(fpath);
+            meta.filepath = fpath;
+            meta.level = output_level;
+            outputs.push_back(std::move(meta));
+            batch.clear();
+            approx = 0;
+        }
+        batch.push_back(kv);
+        approx += es;
+    }
+
+    if (!batch.empty()) {
+        std::ostringstream oss;
+        oss << output_dir << "/sstable_" << seq << ".sst";
+        std::string fpath = oss.str();
+        SSTable::Write(fpath, batch);
+        Metadata meta = SSTable::ReadMetadata(fpath);
+        meta.filepath = fpath;
+        meta.level = output_level;
+        outputs.push_back(std::move(meta));
+    }
+
+    for (auto& in : inputs) garbage_files.push_back(in.filepath);
 }
 
 } // namespace kvdb

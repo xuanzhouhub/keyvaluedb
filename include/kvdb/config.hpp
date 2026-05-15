@@ -35,6 +35,11 @@ struct Config {
 
     static constexpr size_t kMaxWriteQueueBytes = 16 * 1024 * 1024;
 
+    static constexpr size_t kDefaultCompactionThreshold = 8;
+    static constexpr size_t kLevelSizeMultiplier = 10;
+    static constexpr size_t kLevelBaseSSTableSize = 4 * 1024 * 1024;
+    static constexpr size_t kMaxLevel = 7;
+
     static constexpr uint32_t kWALCheckpointSentinel = 0xFFFFFFFF;
 };
 

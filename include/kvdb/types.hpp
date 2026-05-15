@@ -9,6 +9,7 @@ struct KeyValuePair {
     std::string key;
     std::string value;
     uint64_t timestamp = 0;
+    bool is_tombstone = false;
 };
 
 } // namespace kvdb

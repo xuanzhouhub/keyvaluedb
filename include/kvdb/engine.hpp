@@ -21,6 +21,7 @@ namespace kvdb {
 
 struct EngineSyncState;
 struct FlushState;
+struct CompactionState;
 
 class LSMTreeEngine {
 public:
@@ -34,6 +35,7 @@ public:
     LSMTreeEngine& operator=(const LSMTreeEngine&) = delete;
 
     void Insert(const std::string& key, const std::string& value);
+    void Delete(const std::string& key);
 
     bool Lookup(const std::string& key, std::string& value_out) const;
 
@@ -64,6 +66,8 @@ private:
     void DeferRecycle(std::shared_ptr<MemTable> frozen_memtable);
     void DrainRecyclePending();
     void FlushWorkerLoop();
+    void CompactionWorkerLoop();
+    void CompactLevel(int from_level);
 
     struct PendingRecycle {
         std::shared_ptr<MemTable> memtable;
@@ -92,6 +96,7 @@ private:
 
     std::unique_ptr<EngineSyncState> sync_;
     std::unique_ptr<FlushState> flush_;
+    std::unique_ptr<CompactionState> compaction_;
 
     std::vector<PendingRecycle> pending_recycle_;
     std::mutex pending_recycle_mutex_;

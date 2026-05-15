@@ -126,6 +126,7 @@ void Manifest::AddSSTable(uint64_t seq, const SSTable::Metadata& meta) {
     WriteUint32LE(payload, meta.min_key_len);
     WriteUint32LE(payload, meta.max_key_len);
     WriteUint64LE(payload, meta.file_size);
+    WriteUint32LE(payload, static_cast<uint32_t>(meta.level));
     WriteUint16LE(payload, path_len);
     payload.insert(payload.end(), meta.filepath.begin(), meta.filepath.end());
 
@@ -193,6 +194,9 @@ std::vector<SSTable::Metadata> Manifest::Recover() {
             uint64_t file_size_rec;
             if (!ReadUint64LE(infile, file_size_rec)) break;
 
+            uint32_t level_val = 0;
+            if (!ReadUint32LE(infile, level_val)) break;
+
             uint16_t path_len;
             if (!ReadUint16LE(infile, path_len)) break;
 
@@ -218,6 +222,7 @@ std::vector<SSTable::Metadata> Manifest::Recover() {
             meta.min_key_len = min_key_len;
             meta.max_key_len = max_key_len;
             meta.file_size = file_size_rec;
+            meta.level = static_cast<int>(level_val);
 
             results.push_back(std::move(meta));
         } else if (type == kTypeRemoveSSTable) {
