@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
@@ -387,20 +388,31 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
     }
 
     for (auto it = metadata.rbegin(); it != metadata.rend(); ++it) {
+        if (it->level != 0) continue;
         if (scanned_ids.count(it->source_table_id)) continue;
-
         if (!it->min_key.empty() && key < it->min_key) continue;
         if (!it->max_key.empty() && key > it->max_key) continue;
         if (it->bloom.BitCount() > 0 && !it->bloom.MightContain(key)) continue;
-
         try {
             if (SSTable::LookupKey(it->filepath, key, read_ts, value_out)) {
                 if (value_out.empty()) return false;
                 return true;
             }
-        } catch (const std::exception&) {
-            continue;
-        }
+        } catch (const std::exception&) { continue; }
+    }
+
+    for (auto& meta : metadata) {
+        if (meta.level == 0) continue;
+        if (scanned_ids.count(meta.source_table_id)) continue;
+        if (!meta.min_key.empty() && key < meta.min_key) continue;
+        if (!meta.max_key.empty() && key > meta.max_key) continue;
+        if (meta.bloom.BitCount() > 0 && !meta.bloom.MightContain(key)) continue;
+        try {
+            if (SSTable::LookupKey(meta.filepath, key, read_ts, value_out)) {
+                if (value_out.empty()) return false;
+                return true;
+            }
+        } catch (const std::exception&) { continue; }
     }
 
     return false;
@@ -491,10 +503,21 @@ RangeIterator LSMTreeEngine::RangeScan() const {
 
     {
         std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+        std::map<int, std::vector<SSTable::Metadata>> groups;
         for (const auto& meta : sstable_metadata_) {
+            if (meta.level == 0) {
+                try {
+                    auto iter = std::make_unique<SSTableIterator>(meta.filepath);
+                    if (iter->Valid()) sources.push_back(std::move(iter));
+                } catch (...) {}
+            } else {
+                groups[meta.level].push_back(meta);
+            }
+        }
+        for (auto& [lvl, files] : groups) {
             try {
-                auto iter = std::make_unique<SSTableIterator>(meta.filepath);
-                if (iter->Valid()) sources.push_back(std::move(iter));
+                auto li = std::make_unique<LevelIterator>(files);
+                if (li->Valid()) sources.push_back(std::move(li));
             } catch (...) {}
         }
     }
