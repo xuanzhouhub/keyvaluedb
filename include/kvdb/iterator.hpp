@@ -22,6 +22,7 @@ struct SourceIterator {
     virtual bool Valid() const = 0;
     virtual const KeyValuePair& Current() const = 0;
     virtual void Next() = 0;
+    virtual void SeekToKey(const std::string& key) { while (Valid() && Current().key < key) Next(); }
     virtual ~SourceIterator() = default;
 };
 
@@ -32,6 +33,11 @@ struct VectorIterator : SourceIterator {
     bool Valid() const override { return pos < entries.size(); }
     const KeyValuePair& Current() const override { return entries[pos]; }
     void Next() override { ++pos; }
+    void SeekToKey(const std::string& key) override {
+        auto it = std::lower_bound(entries.begin(), entries.end(), key,
+            [](const KeyValuePair& a, const std::string& k) { return a.key < k; });
+        pos = static_cast<size_t>(it - entries.begin());
+    }
 };
 
 struct MemTableSource : SourceIterator {
@@ -144,6 +150,17 @@ public:
         if (!current_->Valid()) OpenNext();
     }
 
+    void SeekToKey(const std::string& key) override {
+        while (idx_ < files_.size() && !files_[idx_].max_key.empty() && files_[idx_].max_key < key)
+            ++idx_;
+        if (idx_ < files_.size()) {
+            current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath);
+            ++idx_;
+            if (current_->Valid()) current_->SeekToKey(key);
+            if (!current_->Valid()) OpenNext();
+        }
+    }
+
 private:
     void OpenNext() {
         while (idx_ < files_.size()) {
@@ -172,8 +189,13 @@ public:
     RangeIterator() = default;
 
     RangeIterator(std::vector<std::unique_ptr<SourceIterator>> sources, uint64_t read_ts,
-                  std::shared_ptr<void> guard = {})
-        : sources_(std::move(sources)), guard_(std::move(guard)), read_ts_(read_ts) {
+                  std::shared_ptr<void> guard = {},
+                  const std::string& start_key = "",
+                  const std::string& end_key = "")
+        : sources_(std::move(sources)), guard_(std::move(guard)), read_ts_(read_ts),
+          start_key_(start_key), end_key_(end_key) {
+        if (!start_key_.empty())
+            for (auto& s : sources_) s->SeekToKey(start_key_);
         heap_cmp_.sources = &sources_;
         heap_ = decltype(heap_)(heap_cmp_);
         for (size_t i = 0; i < sources_.size(); ++i)
@@ -195,6 +217,8 @@ private:
         while (!heap_.empty()) {
             HeapEntry top = heap_.top(); heap_.pop();
             const auto& entry = sources_[top.idx]->Current();
+
+            if (!end_key_.empty() && entry.key > end_key_) { valid_ = false; return; }
 
             std::vector<size_t> same_key;
             same_key.push_back(top.idx);
@@ -228,6 +252,8 @@ private:
     HeapCmp heap_cmp_;
     std::priority_queue<HeapEntry, std::vector<HeapEntry>, HeapCmp> heap_{heap_cmp_};
     uint64_t read_ts_ = 0;
+    std::string start_key_;
+    std::string end_key_;
     KeyValuePair current_;
     bool valid_ = false;
 };

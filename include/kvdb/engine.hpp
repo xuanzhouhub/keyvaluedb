@@ -58,6 +58,7 @@ public:
     void TrimWAL();
 
     RangeIterator RangeScan() const;
+    RangeIterator RangeScan(const std::string& start, const std::string& end) const;
 
 private:
     void EnsureDataDirectoryExists();
