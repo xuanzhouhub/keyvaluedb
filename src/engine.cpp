@@ -577,57 +577,93 @@ void LSMTreeEngine::CompactLevel(int from_level) {
     int to_level = from_level + 1;
     if (to_level > static_cast<int>(Config::kMaxLevel)) return;
 
+    std::vector<SSTable::Metadata> l0;
+    std::vector<SSTable::Metadata> l1;
+    for (auto& m : snapshot) {
+        if (m.level == from_level) l0.push_back(m);
+        else if (m.level == to_level) l1.push_back(m);
+    }
+    if (l0.empty()) return;
+
+    std::sort(l1.begin(), l1.end(),
+              [](const SSTable::Metadata& a, const SSTable::Metadata& b)
+              { return a.min_key < b.min_key; });
+
     size_t max_sst_size = Config::kLevelBaseSSTableSize;
     for (int l = 1; l <= to_level; ++l) max_sst_size *= Config::kLevelSizeMultiplier;
     bool is_last = (to_level == static_cast<int>(Config::kMaxLevel));
 
-    std::vector<SSTable::Metadata> level_inputs;
-    for (auto& m : snapshot)
-        if (m.level == from_level) level_inputs.push_back(m);
-    if (level_inputs.empty()) return;
+    std::vector<std::string> garbage;
+    std::vector<SSTable::Metadata> outputs;
+    std::vector<std::string> input_paths;
 
-    for (auto& src : level_inputs) {
-        std::vector<SSTable::Metadata> inputs;
-        inputs.push_back(src);
-        for (auto& m : snapshot) {
-            if (m.level == to_level && !m.min_key.empty() && !m.max_key.empty()) {
-                if (m.max_key >= src.min_key && m.min_key <= src.max_key)
-                    inputs.push_back(m);
-            }
+    size_t l1_idx = 0;
+    std::string current_lower;
+
+    auto flushPhase = [&](const std::vector<SSTable::Metadata>& phase_inputs) {
+        if (phase_inputs.empty()) return;
+        for (auto& in : phase_inputs) input_paths.push_back(in.filepath);
+        uint64_t seq = sstable_seq_.fetch_add(64);
+        std::vector<SSTable::Metadata> out;
+        std::vector<std::string> gc;
+        SSTable::Compact(phase_inputs, data_dir_, seq, to_level,
+                         max_sst_size, is_last, out, gc);
+        for (auto& o : out) outputs.push_back(o);
+        for (auto& g : gc) garbage.push_back(g);
+    };
+
+    while (l1_idx < l1.size()) {
+        auto& t = l1[l1_idx];
+        std::string phase_lower = current_lower;
+        std::string phase_upper = t.max_key;
+
+        std::vector<SSTable::Metadata> phase;
+        if (!current_lower.empty() && current_lower < t.min_key) {
+            for (auto& s : l0)
+                if (s.max_key >= current_lower && s.min_key <= t.min_key)
+                    phase.push_back(s);
+            phase.push_back(t);
+        } else {
+            phase.push_back(t);
+            for (auto& s : l0)
+                if (s.max_key >= t.min_key && s.min_key <= t.max_key)
+                    phase.push_back(s);
         }
+        flushPhase(phase);
+        current_lower = t.max_key;
+        ++l1_idx;
+    }
 
-        uint64_t start_seq = sstable_seq_.fetch_add(64);
-        std::vector<SSTable::Metadata> outputs;
-        std::vector<std::string> garbage;
-        SSTable::Compact(inputs, data_dir_, start_seq, to_level,
-                         max_sst_size, is_last, outputs, garbage);
+    std::vector<SSTable::Metadata> tail;
+    for (auto& s : l0) {
+        bool covered = false;
+        for (auto& t : l1)
+            if (s.max_key >= t.min_key && s.min_key <= t.max_key)
+                { covered = true; break; }
+        if (!covered) tail.push_back(s);
+    }
+    flushPhase(tail);
 
-        {
-            std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
-            auto& all = sstable_metadata_;
-            for (auto& in : inputs) {
-                all.erase(std::remove_if(all.begin(), all.end(),
-                    [&](const SSTable::Metadata& m) { return m.filepath == in.filepath; }),
-                    all.end());
-            }
-            for (auto& out : outputs) all.push_back(out);
+    {
+        std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+        auto& all = sstable_metadata_;
+        for (auto& p : input_paths) {
+            all.erase(std::remove_if(all.begin(), all.end(),
+                [&](const SSTable::Metadata& m) { return m.filepath == p; }),
+                all.end());
         }
+        for (auto& out : outputs) all.push_back(out);
+    }
 
-        for (auto& in : inputs)
-            manifest_->RemoveSSTable(sstable_seq_.load());
-        for (auto& out : outputs)
-            manifest_->AddSSTable(sstable_seq_.fetch_add(1), out);
-        manifest_->Sync();
+    for (auto& p : input_paths)
+        manifest_->RemoveSSTable(sstable_seq_.load());
+    for (auto& out : outputs)
+        manifest_->AddSSTable(sstable_seq_.fetch_add(1), out);
+    manifest_->Sync();
 
-        for (auto& f : garbage) {
-            std::error_code ec;
-            std::filesystem::remove(f, ec);
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
-            snapshot = sstable_metadata_;
-        }
+    for (auto& f : garbage) {
+        std::error_code ec;
+        std::filesystem::remove(f, ec);
     }
 }
 
