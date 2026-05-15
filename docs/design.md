@@ -26,6 +26,11 @@ Client (TCP)
 │         → Manifest::Add         │
 │         → WAL::Checkpoint       │
 │                                   │
+│  CompactionWorker (background):   │
+│         → Merge levels L→L+1    │
+│         → Tombstone GC at last  │
+│         → Manifest swap + GC    │
+│                                   │
 │  Lookup:                          │
 │    1. Active MemTable (shared lock)
 │    2. Frozen MemTables (shared lock)
@@ -80,6 +85,7 @@ Types: 0x01 = AddSSTable, 0x02 = RemoveSSTable
 | Writer | Dequeues from write queue, calls `Insert()` | **1** (server `WriterLoop`) |
 | WAL sync worker | Periodically `fsync`s WAL buffer to disk | **1** (`EngineSyncState`) |
 | Flush worker | Drains `frozen_memtables_`, writes SSTables | **1** (`FlushState`) |
+| Compaction worker | Merges SSTables across levels when threshold reached | **1** (`CompactionState`) |
 | Readers | `HandleClient` threads calling `Lookup()` / `RangeScan()` | **N** (connection threads) |
 | Main | Recovery, `Flush()`, `WaitForPendingFlushes()`, destructor | **1** |
 
@@ -173,6 +179,29 @@ FlushWorkerLoop:
 
 The flush worker holds no locks during disk I/O (`DoFlush`). It only takes B briefly to pop a memtable, then releases it before the heavy work.
 
+### Compaction Path (Compaction worker)
+
+**Trigger**: Every 2s, counts SSTables per level. When level L reaches 8, compaction fires. To avoid wasted intermediate compactions, the worker checks consecutive levels: if L+1 also has ≥ 8, L+L+1 are compacted together into L+2.
+
+**Algorithm** (`CompactLevel(from, top)` → `SSTable::Compact`):
+1. Snapshot `sstable_metadata_`, collect all SSTables from levels `from` through `top`
+2. Open iterators: individual `SSTableIterator` per L0 file (they overlap); one `LevelIterator` per L1+ level (chains non-overlapping files)
+3. K-way merge-sort: smallest key across all iterators → collect all versions → keep highest timestamp
+4. Tombstone removal: if `to_level == kMaxLevel`, drop entries where the winner is a tombstone
+5. Output: batch entries, write as `sstable_{seq}.sst` with `level = to_level`, split when approaching `4MB * 10^(to_level)`
+6. Lock D: swap `sstable_metadata_` (remove old, add new)
+7. MANIFEST: `RemoveSSTable` for old, `AddSSTable` for new, fsync
+8. Delete old SSTable files from disk
+
+**Leveling strategy**:
+- L0: SSTables from flushes, can overlap, no size limit per file
+- L1+: SSTables from compaction, **non-overlapping** within the level (output is globally sorted)
+- Size: L1 = 40MB, L2 = 400MB, L3 = 4GB … `4MB × 10^level`
+- Threshold: 8 SSTables triggers compaction
+- Cascade: `L0(10) + L1(8)` → compact both → L2 in one pass
+
+**Locking during compaction**: The worker holds D (`sstable_metadata_mutex_`) only during the snapshot and the final swap. The merge (disk I/O) runs lock-free. During the merge, the flush worker can still add L0 SSTables — they'll be picked up in the next compaction cycle. Readers use their own snapshot of metadata, unaffected by the swap.
+
 ### WAL Sync Path (WAL sync worker)
 
 ```
@@ -209,13 +238,14 @@ A frozen memtable stays alive until every active reader has a `read_ts >= fence_
 | Insert (freeze) | B → A |
 | Insert (recycle) | C → B |
 | FlushWorkerLoop | A → B → (D, wal_, manifest_) → C → B |
+| CompactionWorkerLoop | D (snapshot) → [disk I/O, no locks] → D (swap) → manifest_ |
 | Lookup | B (shared) → D |
 | RangeScan | B (shared) → D |
 | Flush() | B → A → A (WaitForPendingFlushes) |
 | WaitForPendingFlushes | A |
 | DeferRecycle | C |
 | DrainRecyclePending | C → B |
-| Destructor | stop flush worker → stop sync worker → B (drain) |
+| Destructor | stop compactor → stop flush → stop sync → B (drain) |
 
 ### Invariants
 
@@ -224,6 +254,9 @@ A frozen memtable stays alive until every active reader has a `read_ts >= fence_
 3. **Timestamp monotonicity**: `global_ts_` is a single atomic counter, strictly increasing. The write queue is FIFO → timestamps reflect enqueue order.
 4. **WAL-before-memtable**: `wal_->Buffer()` always precedes `active_memtable_->Insert()`. On recovery, WAL replay restores lost memtable data.
 5. **Checkpoint-after-flush**: the flush worker writes `WriteCheckpoint` only after `Manifest::AddSSTable` is fsync'd. After recovery, the SSTable is visible and the checkpoint guarantees WAL truncation is safe.
+6. **L1+ non-overlapping**: SSTables from compaction are globally sorted output → no key-range overlap within a level. `LevelIterator` relies on this to chain files sequentially.
+7. **Tombstone removal only at last level**: tombstones propagate downward through compactions and are dropped only when merged into `kMaxLevel`, since no deeper level could hold an older version.
+8. **Compaction visibility**: new SSTables become visible to readers only after the atomic `sstable_metadata_` swap. Old files are deleted only after the MANIFEST update is fsynced — crash recovery replays the manifest to the correct state.
 
 ## Recovery Flow
 
