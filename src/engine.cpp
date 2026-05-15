@@ -577,8 +577,7 @@ void LSMTreeEngine::CompactLevel(int from_level) {
     int to_level = from_level + 1;
     if (to_level > static_cast<int>(Config::kMaxLevel)) return;
 
-    std::vector<SSTable::Metadata> l0;
-    std::vector<SSTable::Metadata> l1;
+    std::vector<SSTable::Metadata> l0, l1;
     for (auto& m : snapshot) {
         if (m.level == from_level) l0.push_back(m);
         else if (m.level == to_level) l1.push_back(m);
@@ -589,60 +588,48 @@ void LSMTreeEngine::CompactLevel(int from_level) {
               [](const SSTable::Metadata& a, const SSTable::Metadata& b)
               { return a.min_key < b.min_key; });
 
-    size_t max_sst_size = Config::kLevelBaseSSTableSize;
-    for (int l = 1; l <= to_level; ++l) max_sst_size *= Config::kLevelSizeMultiplier;
+    size_t max_sst = Config::kLevelBaseSSTableSize;
+    for (int l = 1; l <= to_level; ++l) max_sst *= Config::kLevelSizeMultiplier;
     bool is_last = (to_level == static_cast<int>(Config::kMaxLevel));
 
-    std::vector<std::string> garbage;
     std::vector<SSTable::Metadata> outputs;
+    std::vector<std::string> garbage;
     std::vector<std::string> input_paths;
 
-    size_t l1_idx = 0;
-    std::string current_lower;
-
-    auto flushPhase = [&](const std::vector<SSTable::Metadata>& phase_inputs) {
-        if (phase_inputs.empty()) return;
-        for (auto& in : phase_inputs) input_paths.push_back(in.filepath);
+    auto runCompact = [&](const std::vector<SSTable::Metadata>& ins,
+                          const std::string& lo, const std::string& hi) {
+        for (auto& in : ins) input_paths.push_back(in.filepath);
         uint64_t seq = sstable_seq_.fetch_add(64);
         std::vector<SSTable::Metadata> out;
         std::vector<std::string> gc;
-        SSTable::Compact(phase_inputs, data_dir_, seq, to_level,
-                         max_sst_size, is_last, out, gc);
+        SSTable::Compact(ins, data_dir_, seq, to_level, max_sst,
+                         is_last, lo, hi, out, gc);
         for (auto& o : out) outputs.push_back(o);
         for (auto& g : gc) garbage.push_back(g);
     };
 
-    while (l1_idx < l1.size()) {
-        auto& t = l1[l1_idx];
-        std::string phase_lower = current_lower;
-        std::string phase_upper = t.max_key;
+    std::string cursor;
+    for (auto& t : l1) {
+        if (!t.min_key.empty() && !cursor.empty() && cursor < t.min_key) {
+            std::vector<SSTable::Metadata> mid = l0;
+            runCompact(mid, cursor, t.min_key);
+        }
 
         std::vector<SSTable::Metadata> phase;
-        if (!current_lower.empty() && current_lower < t.min_key) {
-            for (auto& s : l0)
-                if (s.max_key >= current_lower && s.min_key <= t.min_key)
-                    phase.push_back(s);
-            phase.push_back(t);
-        } else {
-            phase.push_back(t);
-            for (auto& s : l0)
-                if (s.max_key >= t.min_key && s.min_key <= t.max_key)
-                    phase.push_back(s);
-        }
-        flushPhase(phase);
-        current_lower = t.max_key;
-        ++l1_idx;
+        phase.push_back(t);
+        for (auto& s : l0)
+            if (s.max_key >= t.min_key && s.min_key <= t.max_key)
+                phase.push_back(s);
+        runCompact(phase, t.min_key, t.max_key);
+        cursor = t.max_key;
     }
 
-    std::vector<SSTable::Metadata> tail;
-    for (auto& s : l0) {
-        bool covered = false;
-        for (auto& t : l1)
-            if (s.max_key >= t.min_key && s.min_key <= t.max_key)
-                { covered = true; break; }
-        if (!covered) tail.push_back(s);
+    if (!cursor.empty()) {
+        std::vector<SSTable::Metadata> tail = l0;
+        runCompact(tail, cursor, "");
+    } else {
+        runCompact(l0, "", "");
     }
-    flushPhase(tail);
 
     {
         std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);

@@ -43,6 +43,8 @@ public:
                         int output_level,
                         size_t max_sstable_size,
                         bool is_last_level,
+                        const std::string& range_lower,
+                        const std::string& range_upper,
                         std::vector<Metadata>& outputs,
                         std::vector<std::string>& garbage_files);
 

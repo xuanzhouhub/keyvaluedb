@@ -328,6 +328,8 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
                       int output_level,
                       size_t max_sstable_size,
                       bool is_last_level,
+                      const std::string& range_lower,
+                      const std::string& range_upper,
                       std::vector<Metadata>& outputs,
                       std::vector<std::string>& garbage_files) {
     struct MergeSrc {
@@ -369,6 +371,8 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
                 }
             }
             if (winner.is_tombstone && is_last_level) continue;
+            if (!range_lower.empty() && winner.key < range_lower) continue;
+            if (!range_upper.empty() && winner.key > range_upper) return {};
             return winner;
         }
     };
