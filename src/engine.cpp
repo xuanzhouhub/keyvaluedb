@@ -141,7 +141,7 @@ void LSMTreeEngine::CompactionWorkerLoop() {
 
         int top = trigger;
         for (int lvl = trigger + 1; lvl <= static_cast<int>(Config::kMaxLevel); ++lvl) {
-            if (counts[static_cast<size_t>(lvl)] >= Config::kDefaultCompactionThreshold / 2)
+            if (counts[static_cast<size_t>(lvl)] >= Config::kDefaultCompactionThreshold)
                 top = lvl;
             else
                 break;
