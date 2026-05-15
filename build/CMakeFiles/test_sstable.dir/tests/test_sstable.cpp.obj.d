@@ -132,6 +132,7 @@ C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.
 C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/sstable.hpp
 C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/bloom.hpp
 C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/vector
+C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/__msvc_bit_utils.hpp
 C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/memtable.hpp
 C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/config.hpp
 C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/bptree.hpp

@@ -26,6 +26,16 @@ struct kvdb::EngineSyncState {
     WAL* wal = nullptr;
 };
 
+struct kvdb::FlushState {
+    std::thread worker;
+    std::mutex mtx;
+    std::condition_variable cv;
+    std::condition_variable done_cv;
+    std::atomic<bool> should_stop{false};
+    std::atomic<size_t> pending{0};
+    LSMTreeEngine* engine = nullptr;
+};
+
 static void SyncWorkerLoop(kvdb::EngineSyncState* s) {
     while (!s->should_stop.load()) {
         {
@@ -51,6 +61,42 @@ static void SyncWorkerLoop(kvdb::EngineSyncState* s) {
         s->synced_seq = synced;
     }
     s->cv.notify_all();
+}
+
+void LSMTreeEngine::FlushWorkerLoop() {
+    while (!flush_->should_stop.load()) {
+        std::shared_ptr<MemTable> to_flush;
+        {
+            std::unique_lock<std::mutex> lock(flush_->mtx);
+            flush_->cv.wait(lock, [this] {
+                return flush_->should_stop.load() || flush_->pending.load() > 0;
+            });
+            if (flush_->should_stop.load() && flush_->pending.load() == 0)
+                break;
+        }
+
+        {
+            std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
+            if (!frozen_memtables_.empty()) {
+                to_flush = frozen_memtables_.front();
+                frozen_memtables_.erase(frozen_memtables_.begin());
+            }
+        }
+
+        if (to_flush && to_flush->EntryCount() > 0) {
+            try {
+                DoFlush(to_flush);
+                wal_->WriteCheckpoint(global_ts_.load());
+                DeferRecycle(std::move(to_flush));
+                DrainRecyclePending();
+            } catch (...) {}
+        }
+        {
+            std::lock_guard<std::mutex> lock(flush_->mtx);
+            if (flush_->pending > 0) flush_->pending--;
+        }
+        flush_->done_cv.notify_all();
+    }
 }
 
 LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_bytes, size_t max_pending_flushes)
@@ -82,9 +128,21 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
     sync_ = std::make_unique<EngineSyncState>();
     sync_->wal = wal_.get();
     sync_->worker = std::thread(SyncWorkerLoop, sync_.get());
+
+    flush_ = std::make_unique<FlushState>();
+    flush_->engine = this;
+    flush_->worker = std::thread([this]() { this->FlushWorkerLoop(); });
 }
 
 LSMTreeEngine::~LSMTreeEngine() {
+    if (flush_) {
+        flush_->should_stop = true;
+        flush_->cv.notify_one();
+        if (flush_->worker.joinable()) {
+            flush_->worker.join();
+        }
+    }
+
     if (sync_) {
         sync_->should_stop = true;
         if (sync_->worker.joinable()) {
@@ -94,10 +152,16 @@ LSMTreeEngine::~LSMTreeEngine() {
 
     try {
         wal_->Sync();
-        for (auto& frozen : frozen_memtables_) {
-            DoFlush(frozen);
+        {
+            std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
+            while (!frozen_memtables_.empty()) {
+                auto frozen = frozen_memtables_.front();
+                frozen_memtables_.erase(frozen_memtables_.begin());
+                lock.unlock();
+                DoFlush(frozen);
+                lock.lock();
+            }
         }
-        frozen_memtables_.clear();
         if (active_memtable_ && active_memtable_->EntryCount() > 0) {
             auto frozen = active_memtable_;
             active_memtable_.reset();
@@ -170,23 +234,21 @@ void LSMTreeEngine::Insert(const std::string& key, const std::string& value) {
         sync_->ready_cv.notify_one();
     }
 
-    std::shared_ptr<MemTable> frozen;
     {
         std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
         active_memtable_->Insert(key, value, ts);
 
         if (active_memtable_->IsFull()) {
-            frozen = active_memtable_;
+            auto frozen = active_memtable_;
             frozen->Freeze();
             frozen_memtables_.push_back(frozen);
+            {
+                std::lock_guard<std::mutex> lk(flush_->mtx);
+                flush_->pending++;
+            }
+            flush_->cv.notify_one();
             active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_);
         }
-    }
-
-    if (frozen) {
-        DoFlush(frozen);
-        wal_->WriteCheckpoint(global_ts_.load());
-        DeferRecycle(frozen);
     }
 
     {
@@ -269,26 +331,31 @@ size_t LSMTreeEngine::ActiveMemTableMemoryUsage() const {
 }
 
 void LSMTreeEngine::Flush() {
-    std::shared_ptr<MemTable> frozen;
     {
         std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
         if (active_memtable_->EntryCount() == 0) {
             return;
         }
-        frozen = active_memtable_;
+        auto frozen = active_memtable_;
         frozen->Freeze();
         frozen_memtables_.push_back(frozen);
+        {
+            std::lock_guard<std::mutex> lk(flush_->mtx);
+            flush_->pending++;
+        }
+        flush_->cv.notify_one();
         active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_);
     }
-
-    DoFlush(frozen);
-    wal_->WriteCheckpoint(global_ts_.load());
-    DeferRecycle(frozen);
-
-    DrainRecyclePending();
+    WaitForPendingFlushes();
 }
 
 void LSMTreeEngine::WaitForPendingFlushes() {
+    {
+        std::unique_lock<std::mutex> lock(flush_->mtx);
+        flush_->done_cv.wait(lock, [this] {
+            return flush_->pending.load() == 0;
+        });
+    }
     DrainRecyclePending();
 }
 

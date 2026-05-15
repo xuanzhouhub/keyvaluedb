@@ -20,6 +20,7 @@
 namespace kvdb {
 
 struct EngineSyncState;
+struct FlushState;
 
 class LSMTreeEngine {
 public:
@@ -62,6 +63,7 @@ private:
     void DoFlush(std::shared_ptr<MemTable> frozen_memtable);
     void DeferRecycle(std::shared_ptr<MemTable> frozen_memtable);
     void DrainRecyclePending();
+    void FlushWorkerLoop();
 
     struct PendingRecycle {
         std::shared_ptr<MemTable> memtable;
@@ -89,6 +91,7 @@ private:
     mutable SnapshotTracker tracker_;
 
     std::unique_ptr<EngineSyncState> sync_;
+    std::unique_ptr<FlushState> flush_;
 
     std::vector<PendingRecycle> pending_recycle_;
     std::mutex pending_recycle_mutex_;
