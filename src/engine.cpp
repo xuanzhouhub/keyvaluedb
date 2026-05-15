@@ -577,57 +577,57 @@ void LSMTreeEngine::CompactLevel(int from_level) {
     int to_level = from_level + 1;
     if (to_level > static_cast<int>(Config::kMaxLevel)) return;
 
-    std::vector<SSTable::Metadata> inputs;
-    std::string min_k, max_k;
-
-    for (auto& m : snapshot) {
-        if (m.level == from_level) {
-            inputs.push_back(m);
-            if (min_k.empty() || m.min_key < min_k) min_k = m.min_key;
-            if (max_k.empty() || m.max_key > max_k) max_k = m.max_key;
-        }
-    }
-    if (inputs.empty()) return;
-
-    std::vector<SSTable::Metadata> overlap;
-    for (auto& m : snapshot) {
-        if (m.level == to_level && !m.min_key.empty() && !m.max_key.empty()) {
-            if (m.max_key >= min_k && m.min_key <= max_k)
-                overlap.push_back(m);
-        }
-    }
-    inputs.insert(inputs.end(), overlap.begin(), overlap.end());
-
     size_t max_sst_size = Config::kLevelBaseSSTableSize;
     for (int l = 1; l <= to_level; ++l) max_sst_size *= Config::kLevelSizeMultiplier;
     bool is_last = (to_level == static_cast<int>(Config::kMaxLevel));
 
-    uint64_t start_seq = sstable_seq_.fetch_add(64);
-    std::vector<SSTable::Metadata> outputs;
-    std::vector<std::string> garbage;
-    SSTable::Compact(inputs, data_dir_, start_seq, to_level,
-                     max_sst_size, is_last, outputs, garbage);
+    std::vector<SSTable::Metadata> level_inputs;
+    for (auto& m : snapshot)
+        if (m.level == from_level) level_inputs.push_back(m);
+    if (level_inputs.empty()) return;
 
-    {
-        std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
-        auto& all = sstable_metadata_;
-        for (auto& in : inputs) {
-            all.erase(std::remove_if(all.begin(), all.end(),
-                [&](const SSTable::Metadata& m) { return m.filepath == in.filepath; }),
-                all.end());
+    for (auto& src : level_inputs) {
+        std::vector<SSTable::Metadata> inputs;
+        inputs.push_back(src);
+        for (auto& m : snapshot) {
+            if (m.level == to_level && !m.min_key.empty() && !m.max_key.empty()) {
+                if (m.max_key >= src.min_key && m.min_key <= src.max_key)
+                    inputs.push_back(m);
+            }
         }
-        for (auto& out : outputs) all.push_back(out);
-    }
 
-    for (auto& in : inputs)
-        manifest_->RemoveSSTable(sstable_seq_.load());
-    for (auto& out : outputs)
-        manifest_->AddSSTable(sstable_seq_.fetch_add(1), out);
-    manifest_->Sync();
+        uint64_t start_seq = sstable_seq_.fetch_add(64);
+        std::vector<SSTable::Metadata> outputs;
+        std::vector<std::string> garbage;
+        SSTable::Compact(inputs, data_dir_, start_seq, to_level,
+                         max_sst_size, is_last, outputs, garbage);
 
-    for (auto& f : garbage) {
-        std::error_code ec;
-        std::filesystem::remove(f, ec);
+        {
+            std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+            auto& all = sstable_metadata_;
+            for (auto& in : inputs) {
+                all.erase(std::remove_if(all.begin(), all.end(),
+                    [&](const SSTable::Metadata& m) { return m.filepath == in.filepath; }),
+                    all.end());
+            }
+            for (auto& out : outputs) all.push_back(out);
+        }
+
+        for (auto& in : inputs)
+            manifest_->RemoveSSTable(sstable_seq_.load());
+        for (auto& out : outputs)
+            manifest_->AddSSTable(sstable_seq_.fetch_add(1), out);
+        manifest_->Sync();
+
+        for (auto& f : garbage) {
+            std::error_code ec;
+            std::filesystem::remove(f, ec);
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+            snapshot = sstable_metadata_;
+        }
     }
 }
 
