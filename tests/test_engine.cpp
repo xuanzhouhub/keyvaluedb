@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <thread>
 
 namespace kvdb_test {
 
@@ -541,6 +542,79 @@ void TestCompactionBasic() {
     CleanupTestDir();
 }
 
+void TestCompactionPreservesData() {
+    CleanupTestDir();
+    {
+        kvdb::LSMTreeEngine engine(kTestDataDir, 4096);
+        for (int i = 0; i < 20; ++i) {
+            engine.Insert("key_" + std::to_string(i), "value_" + std::to_string(i));
+            engine.Flush();
+        }
+        engine.WaitForPendingFlushes();
+
+        // Give compaction worker time to run
+        std::this_thread::sleep_for(std::chrono::seconds(4));
+
+        for (int i = 0; i < 20; ++i) {
+            std::string v;
+            ASSERT_TRUE(engine.Lookup("key_" + std::to_string(i), v));
+            ASSERT_STREQ("value_" + std::to_string(i), v);
+        }
+
+        auto metas = engine.GetSSTableMetadata();
+        int l1_count = 0;
+        for (auto& m : metas) if (m.level == 1) l1_count++;
+        ASSERT_TRUE(l1_count > 0);
+    }
+    CleanupTestDir();
+}
+
+void TestTombstonePropagatesThroughCompaction() {
+    CleanupTestDir();
+    {
+        kvdb::LSMTreeEngine engine(kTestDataDir, 4096);
+        engine.Insert("living", "alive");
+        engine.Insert("dying", "doomed");
+        engine.Flush();
+        engine.Insert("living", "still_alive");
+        engine.Delete("dying");
+        engine.Flush();
+        engine.WaitForPendingFlushes();
+
+        std::this_thread::sleep_for(std::chrono::seconds(4));
+
+        std::string v;
+        ASSERT_TRUE(engine.Lookup("living", v));
+        ASSERT_STREQ("still_alive", v);
+        ASSERT_FALSE(engine.Lookup("dying", v));
+    }
+    CleanupTestDir();
+}
+
+void TestCompactionEmptyLevelsAfterCascade() {
+    CleanupTestDir();
+    {
+        kvdb::LSMTreeEngine engine(kTestDataDir, 4096);
+        for (int round = 0; round < 10; ++round) {
+            for (int i = 0; i < 10; ++i) {
+                engine.Insert("k" + std::to_string(round * 100 + i),
+                              "v" + std::to_string(round * 100 + i));
+                engine.Flush();
+            }
+            engine.WaitForPendingFlushes();
+            std::this_thread::sleep_for(std::chrono::seconds(4));
+        }
+
+        for (int round = 0; round < 10; ++round)
+            for (int i = 0; i < 10; ++i) {
+                std::string v;
+                bool found = engine.Lookup("k" + std::to_string(round * 100 + i), v);
+                ASSERT_TRUE(found);
+            }
+    }
+    CleanupTestDir();
+}
+
 void RunTests() {
     std::cout << "Running LSMTreeEngine Tests...\n\n";
 
@@ -569,6 +643,9 @@ void RunTests() {
     TestDeleteThenReinsert();
     TestDeleteSurvivesFlush();
     TestCompactionBasic();
+    TestCompactionPreservesData();
+    TestTombstonePropagatesThroughCompaction();
+    TestCompactionEmptyLevelsAfterCascade();
 }
 
 } // namespace kvdb_test
