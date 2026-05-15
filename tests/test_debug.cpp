@@ -1,7 +1,8 @@
 #include "kvdb/engine.hpp"
-#include "kvdb/bptree.hpp"
+#include "kvdb/sstable.hpp"
 #include <iostream>
 #include <filesystem>
+#include <map>
 #include <random>
 
 namespace fs = std::filesystem;
@@ -10,67 +11,49 @@ int main() {
     std::string dir = "./test_debug_data";
     fs::remove_all(dir);
 
-    std::cout << "=== Testing B+Tree walk directly ===" << std::endl;
-
-    kvdb::BPlusTree tree;
-    std::mt19937 rng(42);
-    std::uniform_int_distribution<int> key_dist(0, 9);
-    std::uniform_int_distribution<int> len_dist(1, 1024);
-    std::uniform_int_distribution<int> char_dist(32, 126);
-
-    for (int i = 0; i < 100; ++i) {
-        std::string key = "fuzz_" + std::to_string(key_dist(rng));
-        int len = len_dist(rng);
-        std::string value(len, '\0');
-        for (int j = 0; j < len; ++j) value[j] = static_cast<char>(char_dist(rng));
-        tree.Insert(key, value, i + 1);
-    }
-
-    std::cout << "Tree Size: " << tree.Size() << std::endl;
-    std::cout << "Tree Memory: " << tree.MemoryUsage() << std::endl;
-
-    kvdb::BPlusTree::MemTableWalk walk(tree);
-    int walked = 0;
-    int distinct = 0;
-    std::string prev;
-    while (walk.Valid()) {
-        const std::string& k = walk.Key();
-        if (k != prev) { distinct++; prev = k; }
-        walked++;
-        walk.Next();
-    }
-    std::cout << "Walked entries: " << walked << std::endl;
-    std::cout << "Distinct keys: " << distinct << std::endl;
-
-    // Now test through the engine
-    std::cout << "\n=== Testing engine ===" << std::endl;
     {
         kvdb::LSMTreeEngine engine(dir, 4 * 1024 * 1024);
-        for (int i = 0; i < 100; ++i) {
-            std::string key = "fuzz_" + std::to_string(key_dist(rng));
+
+        std::mt19937 rng(42);
+        std::uniform_int_distribution<int> key_dist(0, 99);
+        std::uniform_int_distribution<int> len_dist(1, 1024);
+        std::uniform_int_distribution<int> char_dist('a', 'z');
+
+        std::map<std::string, std::string> confirmed;
+
+        for (int i = 0; i < 50000; ++i) {
+            std::string key = "k" + std::to_string(key_dist(rng));
             int len = len_dist(rng);
             std::string value(len, '\0');
             for (int j = 0; j < len; ++j) value[j] = static_cast<char>(char_dist(rng));
             engine.Insert(key, value);
+            confirmed[key] = value;
         }
-        std::cout << "EntryCount: " << engine.ActiveMemTableEntryCount() << std::endl;
-        std::cout << "SSTableCount: " << engine.SSTableCount() << std::endl;
 
-        // Export entries
-        auto entries = engine.RangeScan();
-        int scanned = 0;
-        while (entries.Valid()) { scanned++; entries.Next(); }
-        std::cout << "RangeScan entries: " << scanned << std::endl;
+        std::cout << "Writes: 50000, Unique: " << confirmed.size() << std::endl;
+
+        int ok = 0, mismatch = 0;
+        for (const auto& [k, v] : confirmed) {
+            std::string a;
+            engine.Lookup(k, a);
+            if (v == a) ok++; else mismatch++;
+        }
+        std::cout << "Before restart: OK=" << ok << " MISMATCH=" << mismatch << std::endl;
     }
 
-    std::cout << "\n--- Restart ---" << std::endl;
+    std::cout << "\n--- SSTable entries ---" << std::endl;
     {
-        kvdb::LSMTreeEngine engine(dir, 4 * 1024 * 1024);
-        std::cout << "SSTableCount: " << engine.SSTableCount() << std::endl;
-        auto metas = engine.GetSSTableMetadata();
-        for (size_t i = 0; i < metas.size(); ++i)
-            std::cout << "  SSTable[" << i << "] " << metas[i].filepath
-                      << " entries=" << metas[i].entry_count << std::endl;
+        std::string fpath = dir + "/sstable_0.sst";
+        if (fs::exists(fpath)) {
+            auto entries = kvdb::SSTable::ReadAll(fpath);
+            std::cout << "Entries: " << entries.size() << std::endl;
+            for (const auto& e : entries) {
+                std::cout << "  " << e.key << " val_len=" << e.value.size() 
+                          << " ts=" << e.timestamp << " val=" << e.value.substr(0,20) << std::endl;
+            }
+        } else {
+            std::cout << "No SSTable found" << std::endl;
+        }
     }
 
     fs::remove_all(dir);
