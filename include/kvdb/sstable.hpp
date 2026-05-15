@@ -1,0 +1,48 @@
+#pragma once
+
+#include "bloom.hpp"
+#include "memtable.hpp"
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+namespace kvdb {
+
+class SSTable {
+public:
+    static void Write(const std::string& filepath, const std::vector<KeyValuePair>& entries);
+    static void WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk& walk,
+                              size_t entry_count);
+
+    struct Metadata {
+        std::string filepath;
+        size_t entry_count = 0;
+        uint32_t min_key_len = 0;
+        uint32_t max_key_len = 0;
+        uint64_t file_size = 0;
+        uint64_t source_table_id = 0;
+        std::string min_key;
+        std::string max_key;
+        BloomFilter bloom;
+        std::vector<uint64_t> block_offsets;
+        std::vector<std::string> block_first_keys;
+    };
+
+    static bool LookupKey(const std::string& filepath, const std::string& key,
+                          uint64_t read_ts, std::string& value_out);
+
+    static Metadata ReadMetadata(const std::string& filepath);
+
+    static std::vector<KeyValuePair> ReadAll(const std::string& filepath);
+
+    static void WriteUint32LE(std::ostream& os, uint32_t value);
+    static void WriteUint32LE(std::vector<char>& buf, uint32_t value);
+    static void WriteUint64LE(std::ostream& os, uint64_t value);
+    static uint32_t ReadUint32LE(std::istream& is);
+    static uint64_t ReadUint64LE(std::istream& is);
+
+private:
+};
+
+} // namespace kvdb

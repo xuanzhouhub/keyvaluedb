@@ -1,0 +1,144 @@
+#include "test_common.hpp"
+#include "kvdb/manifest.hpp"
+#include "kvdb/sstable.hpp"
+
+#include <cstdio>
+#include <filesystem>
+#include <string>
+
+namespace kvdb_test {
+
+namespace fs = std::filesystem;
+
+static const std::string kManifestPath = "./test_manifest_data/MANIFEST";
+
+void Cleanup() {
+    if (fs::exists("./test_manifest_data")) {
+        fs::remove_all("./test_manifest_data");
+    }
+    fs::create_directories("./test_manifest_data");
+}
+
+void TestAddAndRecover() {
+    Cleanup();
+    {
+        kvdb::Manifest m(kManifestPath);
+
+        kvdb::SSTable::Metadata meta;
+        meta.filepath = "sstable_0.sst";
+        meta.entry_count = 42;
+        meta.min_key_len = 1;
+        meta.max_key_len = 100;
+        meta.file_size = 4096;
+
+        m.AddSSTable(0, meta);
+    }
+
+    {
+        kvdb::Manifest m(kManifestPath);
+        auto results = m.Recover();
+        ASSERT_EQ(1u, results.size());
+        ASSERT_STREQ("sstable_0.sst", results[0].filepath);
+        ASSERT_EQ(42u, results[0].entry_count);
+        ASSERT_EQ(1u, results[0].min_key_len);
+        ASSERT_EQ(100u, results[0].max_key_len);
+        ASSERT_EQ(4096u, results[0].file_size);
+    }
+    Cleanup();
+}
+
+void TestMultipleTables() {
+    Cleanup();
+    {
+        kvdb::Manifest m(kManifestPath);
+
+        for (int i = 0; i < 10; ++i) {
+            kvdb::SSTable::Metadata meta;
+            meta.filepath = "sstable_" + std::to_string(i) + ".sst";
+            meta.entry_count = static_cast<size_t>(i * 10);
+            meta.min_key_len = 0;
+            meta.max_key_len = static_cast<uint32_t>(i);
+            meta.file_size = static_cast<uint64_t>(i * 1024);
+            m.AddSSTable(static_cast<uint64_t>(i), meta);
+        }
+    }
+
+    {
+        kvdb::Manifest m(kManifestPath);
+        auto results = m.Recover();
+        ASSERT_EQ(10u, results.size());
+
+        for (int i = 0; i < 10; ++i) {
+            ASSERT_EQ(static_cast<size_t>(i * 10), results[static_cast<size_t>(i)].entry_count);
+        }
+    }
+    Cleanup();
+}
+
+void TestEmptyManifest() {
+    Cleanup();
+    {
+        kvdb::Manifest m(kManifestPath);
+        auto results = m.Recover();
+        ASSERT_EQ(0u, results.size());
+    }
+    Cleanup();
+}
+
+void TestRemoveSSTable() {
+    Cleanup();
+    {
+        kvdb::Manifest m(kManifestPath);
+
+        kvdb::SSTable::Metadata meta;
+        meta.filepath = "sstable_keep.sst";
+        meta.entry_count = 10;
+        meta.min_key_len = 1;
+        meta.max_key_len = 5;
+        meta.file_size = 512;
+        m.AddSSTable(0, meta);
+
+        meta.filepath = "sstable_remove.sst";
+        meta.entry_count = 20;
+        meta.min_key_len = 1;
+        meta.max_key_len = 10;
+        meta.file_size = 1024;
+        m.AddSSTable(1, meta);
+
+        m.RemoveSSTable(1);
+    }
+
+    {
+        kvdb::Manifest m(kManifestPath);
+        auto results = m.Recover();
+        ASSERT_EQ(2u, results.size());
+        ASSERT_STREQ("sstable_keep.sst", results[0].filepath);
+        ASSERT_STREQ("sstable_remove.sst", results[1].filepath);
+    }
+    Cleanup();
+}
+
+void TestEmptyManifestRecoverFromNonexistent() {
+    fs::remove_all("./test_manifest_nonexist");
+    fs::create_directories("./test_manifest_nonexist");
+    {
+        kvdb::Manifest m("./test_manifest_nonexist/MANIFEST");
+        auto results = m.Recover();
+        ASSERT_EQ(0u, results.size());
+    }
+    fs::remove_all("./test_manifest_nonexist");
+}
+
+void RunTests() {
+    std::cout << "Running Manifest Tests...\n\n";
+
+    TestAddAndRecover();
+    TestMultipleTables();
+    TestEmptyManifest();
+    TestRemoveSSTable();
+    TestEmptyManifestRecoverFromNonexistent();
+}
+
+} // namespace kvdb_test
+
+RUN_TESTS()

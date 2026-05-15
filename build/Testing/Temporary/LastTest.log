@@ -1,0 +1,261 @@
+Start testing: May 15 09:07 中国标准时间
+----------------------------------------------------------
+1/10 Testing: test_memtable
+1/10 Test: test_memtable
+Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_memtable.exe"
+Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
+"test_memtable" start time: May 15 09:07 中国标准时间
+Output:
+----------------------------------------------------------
+Running MemTable Tests...
+
+
+=== Test Summary ===
+Total:  74
+Passed: 74
+Failed: 0
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"test_memtable" end time: May 15 09:07 中国标准时间
+"test_memtable" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/10 Testing: test_sstable
+2/10 Test: test_sstable
+Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_sstable.exe"
+Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
+"test_sstable" start time: May 15 09:07 中国标准时间
+Output:
+----------------------------------------------------------
+Running SSTable Tests...
+
+
+=== Test Summary ===
+Total:  2134
+Passed: 2134
+Failed: 0
+<end of output>
+Test time =   0.06 sec
+----------------------------------------------------------
+Test Passed.
+"test_sstable" end time: May 15 09:07 中国标准时间
+"test_sstable" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/10 Testing: test_engine
+3/10 Test: test_engine
+Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_engine.exe"
+Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
+"test_engine" start time: May 15 09:07 中国标准时间
+Output:
+----------------------------------------------------------
+Running LSMTreeEngine Tests...
+
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+
+=== Test Summary ===
+Total:  1137
+Passed: 1137
+Failed: 0
+<end of output>
+Test time =  12.73 sec
+----------------------------------------------------------
+Test Passed.
+"test_engine" end time: May 15 09:07 中国标准时间
+"test_engine" time elapsed: 00:00:12
+----------------------------------------------------------
+
+4/10 Testing: test_wal
+4/10 Test: test_wal
+Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_wal.exe"
+Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
+"test_wal" start time: May 15 09:07 中国标准时间
+Output:
+----------------------------------------------------------
+Running WAL Tests...
+
+
+=== Test Summary ===
+Total:  234
+Passed: 234
+Failed: 0
+<end of output>
+Test time =   0.07 sec
+----------------------------------------------------------
+Test Passed.
+"test_wal" end time: May 15 09:07 中国标准时间
+"test_wal" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/10 Testing: test_manifest
+5/10 Test: test_manifest
+Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_manifest.exe"
+Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
+"test_manifest" start time: May 15 09:07 中国标准时间
+Output:
+----------------------------------------------------------
+Running Manifest Tests...
+
+
+=== Test Summary ===
+Total:  22
+Passed: 22
+Failed: 0
+<end of output>
+Test time =   0.05 sec
+----------------------------------------------------------
+Test Passed.
+"test_manifest" end time: May 15 09:07 中国标准时间
+"test_manifest" time elapsed: 00:00:00
+----------------------------------------------------------
+
+6/10 Testing: test_server
+6/10 Test: test_server
+Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_server.exe"
+Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
+"test_server" start time: May 15 09:07 中国标准时间
+Output:
+----------------------------------------------------------
+Running Server Tests...
+
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+[Recovery] MANIFEST: 0 SSTables
+
+=== Test Summary ===
+Total:  206
+Passed: 206
+Failed: 0
+<end of output>
+Test time =   0.92 sec
+----------------------------------------------------------
+Test Passed.
+"test_server" end time: May 15 09:07 中国标准时间
+"test_server" time elapsed: 00:00:00
+----------------------------------------------------------
+
+7/10 Testing: test_wfw
+7/10 Test: test_wfw
+Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_wfw.exe"
+Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
+"test_wfw" start time: May 15 09:07 中国标准时间
+Output:
+----------------------------------------------------------
+ReadMetadata OK: entry_count=100 blocks=1 min_key=k0 max_key=k99
+test_wfw PASSED
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"test_wfw" end time: May 15 09:07 中国标准时间
+"test_wfw" time elapsed: 00:00:00
+----------------------------------------------------------
+
+8/10 Testing: test_small
+8/10 Test: test_small
+Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_small.exe"
+Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
+"test_small" start time: May 15 09:07 中国标准时间
+Output:
+----------------------------------------------------------
+ReadMetadata OK: entry_count=500 blocks=3
+ReadAll: 500 entries
+PASSED
+<end of output>
+Test time =   0.03 sec
+----------------------------------------------------------
+Test Passed.
+"test_small" end time: May 15 09:07 中国标准时间
+"test_small" time elapsed: 00:00:00
+----------------------------------------------------------
+
+9/10 Testing: test_restart
+9/10 Test: test_restart
+Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_restart.exe"
+Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
+"test_restart" start time: May 15 09:07 中国标准时间
+Output:
+----------------------------------------------------------
+--- Phase 1: Write ---
+[Recovery] MANIFEST: 0 SSTables
+  SSTableCount: 1
+  MemTableEntryCount: 0
+  HasWALData: 1
+  Lookup k25: v25
+  (destroying engine)
+
+--- Phase 2: Restart Recovery ---
+[Recovery] MANIFEST: 1 SSTables
+  [0] ./test_restart_data/sstable_0.sst entries=50
+  SSTableCount: 1
+  MemTableEntryCount: 0
+  HasWALData: 0
+  Lookup k25: v25
+
+PASSED
+<end of output>
+Test time =   0.10 sec
+----------------------------------------------------------
+Test Passed.
+"test_restart" end time: May 15 09:07 中国标准时间
+"test_restart" time elapsed: 00:00:00
+----------------------------------------------------------
+
+10/10 Testing: test_debug
+10/10 Test: test_debug
+Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_debug.exe"
+Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
+"test_debug" start time: May 15 09:07 中国标准时间
+Output:
+----------------------------------------------------------
+=== Testing B+Tree walk directly ===
+Tree Size: 10
+Tree Memory: 4316
+Walked entries: 97
+Distinct keys: 10
+
+=== Testing engine ===
+[Recovery] MANIFEST: 0 SSTables
+EntryCount: 13
+SSTableCount: 0
+RangeScan entries: 94
+
+--- Restart ---
+[Recovery] MANIFEST: 1 SSTables
+  [0] ./test_debug_data/sstable_0.sst entries=10
+SSTableCount: 1
+  SSTable[0] ./test_debug_data/sstable_0.sst entries=10
+<end of output>
+Test time =   0.09 sec
+----------------------------------------------------------
+Test Passed.
+"test_debug" end time: May 15 09:07 中国标准时间
+"test_debug" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: May 15 09:07 中国标准时间

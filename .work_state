@@ -1,0 +1,9 @@
+# Crash-resume state for AI agent working on keyvaluedb
+# Format: KEY=VALUE
+# Last updated: 2026-05-15
+
+CURRENT_STEP=5
+CURRENT_TASK=fix_fuzz_recovery
+TASK_DESCRIPTION=Fixing BPlusTree memory_usage_ tracking bug causing IsFull() to never trigger, leading to 0-entry SSTable on recovery
+PROGRESS=fixing_code
+ISSUES_FOUND=BPlusTree::Insert does not accumulate memory_usage_ for MVCC version updates|causing IsFull() to always return false|causing no flushes during fuzz test|causing destructor to flush a corrupted memtable with 0 entries|LeafPage::Free() has unsigned wrap-around bug when data_start < slot_end
