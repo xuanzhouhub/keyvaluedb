@@ -166,6 +166,22 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
     }
     sstable_seq_ = sstable_metadata_.size();
 
+    {
+        std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+        for (auto& meta : sstable_metadata_) {
+            if (meta.min_key.empty() || meta.max_key.empty()) {
+                try {
+                    auto full = SSTable::ReadMetadata(meta.filepath);
+                    meta.min_key = std::move(full.min_key);
+                    meta.max_key = std::move(full.max_key);
+                    meta.bloom = std::move(full.bloom);
+                    meta.block_offsets = std::move(full.block_offsets);
+                    meta.block_first_keys = std::move(full.block_first_keys);
+                } catch (...) {}
+            }
+        }
+    }
+
     std::string wal_path = data_dir_ + "/wal.log";
     wal_ = std::make_unique<WAL>(wal_path);
 
