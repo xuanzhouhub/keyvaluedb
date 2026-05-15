@@ -4,6 +4,7 @@
 #include "config.hpp"
 #include "memtable.hpp"
 #include "snappy.hpp"
+#include "sstable.hpp"
 #include "types.hpp"
 
 #include <cstdint>
@@ -125,6 +126,37 @@ private:
     }
 
     static constexpr int kCompression = Config::kCompressionSnappy ? 1 : 0;
+};
+
+class LevelIterator : public SourceIterator {
+public:
+    LevelIterator(const std::vector<SSTable::Metadata>& files) : files_(files) {
+        std::sort(files_.begin(), files_.end(),
+                  [](const SSTable::Metadata& a, const SSTable::Metadata& b)
+                  { return a.min_key < b.min_key; });
+        OpenNext();
+    }
+
+    bool Valid() const override { return current_ && current_->Valid(); }
+    const KeyValuePair& Current() const override { return current_->Current(); }
+    void Next() override {
+        current_->Next();
+        if (!current_->Valid()) OpenNext();
+    }
+
+private:
+    void OpenNext() {
+        while (idx_ < files_.size()) {
+            current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath);
+            ++idx_;
+            if (current_->Valid()) return;
+        }
+        current_.reset();
+    }
+
+    std::vector<SSTable::Metadata> files_;
+    size_t idx_ = 0;
+    std::unique_ptr<SSTableIterator> current_;
 };
 
 class RangeIterator {

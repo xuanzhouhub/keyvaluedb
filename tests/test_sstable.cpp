@@ -375,8 +375,8 @@ void TestCompactBasic() {
 
     std::vector<kvdb::KeyValuePair> e1, e2;
     e1.push_back({"a", "first", 1, false});
-    e1.push_back({"c", "third", 3, false});
-    e2.push_back({"b", "second", 2, false});
+    e1.push_back({"b", "second", 2, false});
+    e2.push_back({"c", "third", 3, false});
     e2.push_back({"d", "fourth", 4, false});
 
     kvdb::SSTable::Write("./test_sstable_data/comp1.sst", e1);

@@ -6,6 +6,7 @@
 
 #include <cstring>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <iostream>
 #include <stdexcept>
@@ -333,9 +334,9 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
                       std::vector<Metadata>& outputs,
                       std::vector<std::string>& garbage_files) {
     struct MergeSrc {
-        std::unique_ptr<SSTableIterator> iter;
+        std::unique_ptr<SourceIterator> iter;
         KeyValuePair cur;
-        MergeSrc(std::unique_ptr<SSTableIterator> i) : iter(std::move(i)) {
+        MergeSrc(std::unique_ptr<SourceIterator> i) : iter(std::move(i)) {
             if (iter->Valid()) cur = iter->Current();
         }
         bool Valid() const { return iter->Valid(); }
@@ -343,10 +344,23 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
         void Next() { iter->Next(); if (iter->Valid()) cur = iter->Current(); }
     };
     std::vector<MergeSrc> sources;
+
     for (auto& in : inputs) {
-        auto it = std::make_unique<SSTableIterator>(in.filepath);
-        if (it->Valid()) sources.emplace_back(std::move(it));
+        if (in.level == 0) {
+            auto it = std::make_unique<SSTableIterator>(in.filepath);
+            if (it->Valid()) sources.emplace_back(std::move(it));
+        }
     }
+
+    std::map<int, std::vector<SSTable::Metadata>> level_groups;
+    for (auto& in : inputs) {
+        if (in.level > 0) level_groups[in.level].push_back(in);
+    }
+    for (auto& [lvl, files] : level_groups) {
+        auto li = std::make_unique<LevelIterator>(files);
+        if (li->Valid()) sources.emplace_back(std::move(li));
+    }
+
     if (sources.empty()) return;
 
     auto nextKey = [&]() -> KeyValuePair {
