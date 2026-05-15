@@ -2,6 +2,7 @@
 #include "kvdb/sstable.hpp"
 #include "kvdb/config.hpp"
 #include "kvdb/snappy.hpp"
+#include "kvdb/bptree.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -242,8 +243,11 @@ void TestBlockIndexLookup() {
     std::filesystem::create_directories("./test_sstable_data");
 
     std::vector<kvdb::KeyValuePair> entries;
-    for (int i = 0; i < 500; ++i)
-        entries.push_back({"k" + std::to_string(i), "v" + std::to_string(i), static_cast<uint64_t>(i)});
+    for (int i = 0; i < 500; ++i) {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "k%03d", i);
+        entries.push_back({buf, "v" + std::to_string(i), static_cast<uint64_t>(i)});
+    }
 
     kvdb::SSTable::Write("./test_sstable_data/blockidx.sst", entries);
 
@@ -253,8 +257,10 @@ void TestBlockIndexLookup() {
 
     for (int i = 0; i < 500; ++i) {
         std::string v;
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "k%03d", i);
         ASSERT_TRUE(kvdb::SSTable::LookupKey("./test_sstable_data/blockidx.sst",
-            "k" + std::to_string(i), static_cast<uint64_t>(i), v));
+            buf, static_cast<uint64_t>(i), v));
         ASSERT_STREQ("v" + std::to_string(i), v);
     }
 
@@ -291,6 +297,31 @@ void TestSnappyRoundTrip() {
     ASSERT_STREQ(original, decompressed);
 }
 
+void TestWriteFromWalkPicksNewestTS() {
+    std::filesystem::remove_all("./test_sstable_data");
+    std::filesystem::create_directories("./test_sstable_data");
+
+    kvdb::BPlusTree tree;
+    for (int i = 0; i < 100; ++i)
+        tree.Insert("k1", "old_" + std::to_string(i), static_cast<uint64_t>(i + 1));
+    tree.Insert("k2", "v2", 200);
+    tree.Insert("k1", "NEWEST", 201);
+
+    kvdb::BPlusTree::MemTableWalk walk(tree);
+    std::string filepath = "./test_sstable_data/walk.sst";
+    kvdb::SSTable::WriteFromWalk(filepath, walk, tree.Size());
+
+    auto entries = kvdb::SSTable::ReadAll(filepath);
+    ASSERT_EQ(2u, entries.size());
+
+    std::string v;
+    ASSERT_TRUE(kvdb::SSTable::LookupKey(filepath, "k1", 999, v));
+    ASSERT_STREQ("NEWEST", v);
+
+    ASSERT_TRUE(kvdb::SSTable::LookupKey(filepath, "k2", 999, v));
+    ASSERT_STREQ("v2", v);
+}
+
 void RunTests() {
     std::cout << "Running SSTable Tests...\n\n";
 
@@ -306,8 +337,10 @@ void RunTests() {
     TestPreserveOrder();
     TestNonExistentFileThrows();
     TestBloomFilterNoFalseNegatives();
+    TestBlockIndexLookup();
     TestRangeFilter();
     TestSnappyRoundTrip();
+    TestWriteFromWalkPicksNewestTS();
 }
 
 } // namespace kvdb_test

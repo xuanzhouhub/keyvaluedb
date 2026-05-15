@@ -201,6 +201,63 @@ void TestLargeValueBlobRoundTrip() {
     ASSERT_EQ(42u, entries[0].timestamp);
 }
 
+void TestMemoryGrowthOnUpdate() {
+    kvdb::MemTable memtable(0, 1024 * 1024);
+    memtable.Insert("k", std::string(100, 'a'));
+    size_t m1 = memtable.ApproximateMemoryUsage();
+    ASSERT_TRUE(m1 > 0);
+    memtable.Insert("k", std::string(200, 'b'));
+    size_t m2 = memtable.ApproximateMemoryUsage();
+    ASSERT_TRUE(m2 > m1);
+}
+
+void TestIsFullAfterUpdates() {
+    kvdb::MemTable memtable(0, 600);
+    memtable.Insert("k", std::string(400, 'x'));
+    ASSERT_FALSE(memtable.IsFull());
+    memtable.Insert("k", std::string(400, 'y'));
+    ASSERT_TRUE(memtable.IsFull());
+}
+
+void TestExportAfterHeavyMVCC() {
+    kvdb::MemTable memtable(0, 1024 * 1024);
+    for (int i = 0; i < 100; ++i)
+        memtable.Insert("onlykey", "val_" + std::to_string(i), static_cast<uint64_t>(i + 1));
+    auto entries = memtable.ExportEntries();
+    ASSERT_TRUE(entries.size() > 0u);
+    std::string v;
+    ASSERT_TRUE(memtable.Lookup("onlykey", 200, v));
+    ASSERT_STREQ("val_99", v);
+}
+
+void TestExportAfterSplittingMVCC() {
+    kvdb::MemTable memtable(0, 1024 * 1024);
+    for (int i = 0; i < 50; ++i)
+        memtable.Insert("k1", "first_"  + std::to_string(i), static_cast<uint64_t>(i + 1));
+    for (int i = 0; i < 50; ++i)
+        memtable.Insert("k2", "second_" + std::to_string(i), static_cast<uint64_t>(i + 51));
+    auto entries = memtable.ExportEntries();
+    ASSERT_TRUE(entries.size() >= 2u);
+    std::string v;
+    ASSERT_TRUE(memtable.Lookup("k1", 200, v));
+    ASSERT_STREQ("first_49", v);
+    ASSERT_TRUE(memtable.Lookup("k2", 200, v));
+    ASSERT_STREQ("second_49", v);
+}
+
+void TestExportAfterManySplits() {
+    kvdb::MemTable memtable(0, 1024 * 1024);
+    std::string big(1500, 'X');
+    for (int i = 0; i < 100; ++i) {
+        memtable.Insert("k" + std::to_string(i), big + static_cast<char>('a' + (i % 26)),
+                        static_cast<uint64_t>(i + 1));
+    }
+    auto entries = memtable.ExportEntries();
+    ASSERT_TRUE(entries.size() >= 50u);
+    for (size_t i = 1; i < entries.size(); ++i)
+        ASSERT_TRUE(entries[i - 1].key < entries[i].key);
+}
+
 void RunTests() {
     std::cout << "Running MemTable Tests...\n\n";
     TestBasicInsert();
@@ -221,6 +278,11 @@ void RunTests() {
     TestMVCCMultiVersionInterleaved();
     TestLargeValue();
     TestLargeValueBlobRoundTrip();
+    TestMemoryGrowthOnUpdate();
+    TestIsFullAfterUpdates();
+    TestExportAfterHeavyMVCC();
+    TestExportAfterSplittingMVCC();
+    TestExportAfterManySplits();
 }
 
 }
