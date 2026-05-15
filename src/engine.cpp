@@ -139,8 +139,16 @@ void LSMTreeEngine::CompactionWorkerLoop() {
         }
         if (trigger < 0) continue;
 
+        int top = trigger;
+        for (int lvl = trigger + 1; lvl <= static_cast<int>(Config::kMaxLevel); ++lvl) {
+            if (counts[static_cast<size_t>(lvl)] >= Config::kDefaultCompactionThreshold / 2)
+                top = lvl;
+            else
+                break;
+        }
+
         try {
-            CompactLevel(trigger);
+            CompactLevel(trigger, top);
         } catch (...) {}
     }
 }
@@ -567,19 +575,19 @@ void LSMTreeEngine::DrainRecyclePending() {
     }
 }
 
-void LSMTreeEngine::CompactLevel(int from_level) {
+void LSMTreeEngine::CompactLevel(int from_level, int top_level) {
     std::vector<SSTable::Metadata> snapshot;
     {
         std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
         snapshot = sstable_metadata_;
     }
 
-    int to_level = from_level + 1;
+    int to_level = top_level + 1;
     if (to_level > static_cast<int>(Config::kMaxLevel)) return;
 
     std::vector<SSTable::Metadata> inputs;
     for (auto& m : snapshot) {
-        if (m.level == from_level || m.level == to_level)
+        if (m.level >= from_level && m.level <= top_level)
             inputs.push_back(m);
     }
     if (inputs.empty()) return;

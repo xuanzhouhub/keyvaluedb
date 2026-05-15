@@ -67,7 +67,7 @@ private:
     void DrainRecyclePending();
     void FlushWorkerLoop();
     void CompactionWorkerLoop();
-    void CompactLevel(int from_level);
+    void CompactLevel(int from_level, int top_level);
 
     struct PendingRecycle {
         std::shared_ptr<MemTable> memtable;
