@@ -1,4 +1,5 @@
 C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/server.hpp
+C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/config.hpp
 C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/cstddef
 C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/yvals_core.h
 C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/vcruntime.h

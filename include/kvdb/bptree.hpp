@@ -45,7 +45,7 @@ public:
         }
         const char* Rec(uint32_t i) const { return Raw() + Offset(i); }
         char* Rec(uint32_t i) { return Raw() + Offset(i); }
-        uint32_t Free() const { return data_start - slot_end; }
+        uint32_t Free() const { return data_start > slot_end ? data_start - slot_end : 0U; }
 
         bool Find(const std::string& key, uint32_t& idx) const {
             int lo = 0, hi = static_cast<int>(count) - 1;
@@ -311,9 +311,6 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
 
     if (leaf->Find(key, pos)) {
         size_t es = key.size() + value.size() + Config::kMemTableEntryOverheadBytes;
-        size_t old = leaf->KeyLen(pos) + (leaf->ValLen(pos) == kLargeValFlag ? 8 : leaf->ValLen(pos))
-                    + Config::kMemTableEntryOverheadBytes;
-        memory_usage_ -= old;
         if (!leaf->InsertEntry(pos, key, value, timestamp, large)) {
             SplitLeaf(leaf, path.back(), indices.back(), path, indices);
             leaf = FindLeafForWrite(key, path, indices);

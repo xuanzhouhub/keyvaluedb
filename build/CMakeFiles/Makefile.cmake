@@ -58,6 +58,5 @@ set(CMAKE_DEPEND_INFO_FILES
   "CMakeFiles/test_wfw.dir/DependInfo.cmake"
   "CMakeFiles/test_small.dir/DependInfo.cmake"
   "CMakeFiles/test_restart.dir/DependInfo.cmake"
-  "CMakeFiles/test_debug.dir/DependInfo.cmake"
   "CMakeFiles/test_fuzz.dir/DependInfo.cmake"
   )

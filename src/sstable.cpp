@@ -170,6 +170,9 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
         if (k != prev_key) {
             flushBest();
             prev_key = k; best_ts = walk.Timestamp(); best_val = walk.Value(); has_best = true;
+        } else {
+            uint64_t ts = walk.Timestamp();
+            if (ts > best_ts) { best_ts = ts; best_val = walk.Value(); }
         }
         walk.Next();
     }

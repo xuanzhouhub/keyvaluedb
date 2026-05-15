@@ -246,19 +246,6 @@ test_restart\fast:
 .PHONY : test_restart\fast
 
 #=============================================================================
-# Target rules for targets named test_debug
-
-# Build rule for target.
-test_debug: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\Makefile2 /nologo -$(MAKEFLAGS) test_debug
-.PHONY : test_debug
-
-# fast build rule for target.
-test_debug\fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_debug.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_debug.dir\build
-.PHONY : test_debug\fast
-
-#=============================================================================
 # Target rules for targets named test_fuzz
 
 # Build rule for target.
@@ -462,30 +449,6 @@ src\wal.s: src\wal.cpp.s
 src\wal.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\kvdb_lib.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\kvdb_lib.dir\src\wal.cpp.s
 .PHONY : src\wal.cpp.s
-
-tests\test_debug.obj: tests\test_debug.cpp.obj
-.PHONY : tests\test_debug.obj
-
-# target to build an object file
-tests\test_debug.cpp.obj:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_debug.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_debug.dir\tests\test_debug.cpp.obj
-.PHONY : tests\test_debug.cpp.obj
-
-tests\test_debug.i: tests\test_debug.cpp.i
-.PHONY : tests\test_debug.i
-
-# target to preprocess a source file
-tests\test_debug.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_debug.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_debug.dir\tests\test_debug.cpp.i
-.PHONY : tests\test_debug.cpp.i
-
-tests\test_debug.s: tests\test_debug.cpp.s
-.PHONY : tests\test_debug.s
-
-# target to generate assembly for a file
-tests\test_debug.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_debug.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_debug.dir\tests\test_debug.cpp.s
-.PHONY : tests\test_debug.cpp.s
 
 tests\test_engine.obj: tests\test_engine.cpp.obj
 .PHONY : tests\test_engine.obj
@@ -737,7 +700,6 @@ help:
 	@echo ... rebuild_cache
 	@echo ... test
 	@echo ... kvdb_lib
-	@echo ... test_debug
 	@echo ... test_engine
 	@echo ... test_fuzz
 	@echo ... test_manifest
@@ -772,9 +734,6 @@ help:
 	@echo ... src/wal.obj
 	@echo ... src/wal.i
 	@echo ... src/wal.s
-	@echo ... tests/test_debug.obj
-	@echo ... tests/test_debug.i
-	@echo ... tests/test_debug.s
 	@echo ... tests/test_engine.obj
 	@echo ... tests/test_engine.i
 	@echo ... tests/test_engine.s

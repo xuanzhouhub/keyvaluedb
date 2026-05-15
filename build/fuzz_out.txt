@@ -1,7 +1,0 @@
-=== Fault-Injection Fuzz Test ===
-Clients: 16
-Duration: 20s
-Kill interval: 4s
-Key pool: 100
-Max value: 1024 bytes
-  [server up]
