@@ -369,6 +369,93 @@ void TestWriteFromWalkWithBlobs() {
     ASSERT_EQ(5u, meta.entry_count);
 }
 
+void TestCompactBasic() {
+    std::filesystem::remove_all("./test_sstable_data");
+    std::filesystem::create_directories("./test_sstable_data");
+
+    std::vector<kvdb::KeyValuePair> e1, e2;
+    e1.push_back({"a", "first", 1, false});
+    e1.push_back({"c", "third", 3, false});
+    e2.push_back({"b", "second", 2, false});
+    e2.push_back({"d", "fourth", 4, false});
+
+    kvdb::SSTable::Write("./test_sstable_data/comp1.sst", e1);
+    kvdb::SSTable::Write("./test_sstable_data/comp2.sst", e2);
+
+    auto m1 = kvdb::SSTable::ReadMetadata("./test_sstable_data/comp1.sst");
+    m1.level = 1; m1.filepath = "./test_sstable_data/comp1.sst";
+    auto m2 = kvdb::SSTable::ReadMetadata("./test_sstable_data/comp2.sst");
+    m2.level = 1; m2.filepath = "./test_sstable_data/comp2.sst";
+
+    std::vector<kvdb::SSTable::Metadata> inputs = {m1, m2};
+    std::vector<kvdb::SSTable::Metadata> outputs;
+    std::vector<std::string> garbage;
+
+    kvdb::SSTable::Compact(inputs, "./test_sstable_data", 100, 2,
+                           4 * 1024 * 1024, false, outputs, garbage);
+
+    ASSERT_EQ(1u, outputs.size());
+    ASSERT_EQ(2, outputs[0].level);
+    ASSERT_EQ(4u, outputs[0].entry_count);
+
+    auto result = kvdb::SSTable::ReadAll(outputs[0].filepath);
+    ASSERT_EQ(4u, result.size());
+    ASSERT_STREQ("a", result[0].key);
+    ASSERT_STREQ("b", result[1].key);
+    ASSERT_STREQ("c", result[2].key);
+    ASSERT_STREQ("d", result[3].key);
+}
+
+void TestCompactTombstoneRemoval() {
+    std::filesystem::remove_all("./test_sstable_data");
+    std::filesystem::create_directories("./test_sstable_data");
+
+    std::vector<kvdb::KeyValuePair> entries;
+    entries.push_back({"k", "old", 5, false});
+    entries.push_back({"k", "", 10, true});
+
+    kvdb::SSTable::Write("./test_sstable_data/tomb.sst", entries);
+
+    auto m = kvdb::SSTable::ReadMetadata("./test_sstable_data/tomb.sst");
+    m.level = 0; m.filepath = "./test_sstable_data/tomb.sst";
+
+    std::vector<kvdb::SSTable::Metadata> inputs = {m};
+    std::vector<kvdb::SSTable::Metadata> outputs;
+    std::vector<std::string> garbage;
+
+    kvdb::SSTable::Compact(inputs, "./test_sstable_data", 200, 7,
+                           4 * 1024 * 1024, true, outputs, garbage);
+
+    ASSERT_EQ(0u, outputs.size());
+}
+
+void TestCompactSplitting() {
+    std::filesystem::remove_all("./test_sstable_data");
+    std::filesystem::create_directories("./test_sstable_data");
+
+    std::vector<kvdb::KeyValuePair> entries;
+    for (int i = 0; i < 100; ++i)
+        entries.push_back({"k" + std::to_string(i), std::string(500, 'X'),
+                           static_cast<uint64_t>(i), false});
+
+    kvdb::SSTable::Write("./test_sstable_data/big.sst", entries);
+    auto m = kvdb::SSTable::ReadMetadata("./test_sstable_data/big.sst");
+    m.level = 0; m.filepath = "./test_sstable_data/big.sst";
+
+    std::vector<kvdb::SSTable::Metadata> inputs = {m};
+    std::vector<kvdb::SSTable::Metadata> outputs;
+    std::vector<std::string> garbage;
+
+    kvdb::SSTable::Compact(inputs, "./test_sstable_data", 300, 1,
+                           8 * 1024, false, outputs, garbage);
+
+    ASSERT_TRUE(outputs.size() > 1);
+    size_t total = 0;
+    for (auto& o : outputs) total += o.entry_count;
+    ASSERT_EQ(100u, total);
+    ASSERT_EQ(1, outputs[0].level);
+}
+
 void RunTests() {
     std::cout << "Running SSTable Tests...\n\n";
 
@@ -389,6 +476,9 @@ void RunTests() {
     TestSnappyRoundTrip();
     TestWriteFromWalkPicksNewestTS();
     TestWriteFromWalkWithBlobs();
+    TestCompactBasic();
+    TestCompactTombstoneRemoval();
+    TestCompactSplitting();
 }
 
 } // namespace kvdb_test

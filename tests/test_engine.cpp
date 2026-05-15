@@ -477,6 +477,70 @@ void TestRecycleAfterExplicitFlush() {
     CleanupTestDir();
 }
 
+void TestDelete() {
+    CleanupTestDir();
+    {
+        kvdb::LSMTreeEngine engine(kTestDataDir, 4096);
+        engine.Insert("k", "value");
+        std::string val;
+        ASSERT_TRUE(engine.Lookup("k", val));
+        ASSERT_STREQ("value", val);
+        engine.Delete("k");
+        ASSERT_FALSE(engine.Lookup("k", val));
+        ASSERT_TRUE(val.empty());
+    }
+    CleanupTestDir();
+}
+
+void TestDeleteThenReinsert() {
+    CleanupTestDir();
+    {
+        kvdb::LSMTreeEngine engine(kTestDataDir, 4096);
+        engine.Insert("k", "v1");
+        engine.Delete("k");
+        engine.Insert("k", "v2");
+        std::string val;
+        ASSERT_TRUE(engine.Lookup("k", val));
+        ASSERT_STREQ("v2", val);
+    }
+    CleanupTestDir();
+}
+
+void TestDeleteSurvivesFlush() {
+    CleanupTestDir();
+    {
+        kvdb::LSMTreeEngine engine(kTestDataDir, 4096);
+        engine.Insert("keep", "alive");
+        engine.Insert("dead", "walking");
+        engine.Delete("dead");
+        engine.Flush();
+        std::string val;
+        ASSERT_TRUE(engine.Lookup("keep", val));
+        ASSERT_STREQ("alive", val);
+        ASSERT_FALSE(engine.Lookup("dead", val));
+    }
+    CleanupTestDir();
+}
+
+void TestCompactionBasic() {
+    CleanupTestDir();
+    {
+        kvdb::LSMTreeEngine engine(kTestDataDir, 4096);
+        for (int i = 1; i <= 10; ++i) {
+            engine.Insert("k" + std::to_string(i), "v" + std::to_string(i));
+            engine.Flush();
+        }
+        engine.WaitForPendingFlushes();
+        ASSERT_TRUE(engine.SSTableCount() > 0);
+        for (int i = 1; i <= 10; ++i) {
+            std::string v;
+            ASSERT_TRUE(engine.Lookup("k" + std::to_string(i), v));
+            ASSERT_STREQ("v" + std::to_string(i), v);
+        }
+    }
+    CleanupTestDir();
+}
+
 void RunTests() {
     std::cout << "Running LSMTreeEngine Tests...\n\n";
 
@@ -501,6 +565,10 @@ void RunTests() {
     TestMVCCVersionAfterFlush();
     TestRecyclePreservesLookup();
     TestRecycleAfterExplicitFlush();
+    TestDelete();
+    TestDeleteThenReinsert();
+    TestDeleteSurvivesFlush();
+    TestCompactionBasic();
 }
 
 } // namespace kvdb_test
