@@ -140,7 +140,8 @@ CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\
 CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\queue"
 CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\deque"
 CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\sstream"
-CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\manifest.hpp"
+CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\kv_cache.hpp"
+CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\list"
 CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\mutex"
 CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_chrono.hpp"
 CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\ratio"
@@ -149,10 +150,14 @@ CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\
 CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_startup.h"
 CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\math.h"
 CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vcruntime_startup.h"
+CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\unordered_map"
+CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xhash"
+CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xbit_ops.h"
+CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xnode_handle.h"
+CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\manifest.hpp"
 CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\snp_tracker.hpp"
 CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\set"
 CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xtree"
-CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xnode_handle.h"
 CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\wal.hpp"
 CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\condition_variable"
 CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\shared_mutex"
@@ -466,6 +471,10 @@ CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\
 
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\deque":
 
+"C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\kv_cache.hpp":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\list":
+
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\chrono":
 
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\ratio":
@@ -476,13 +485,19 @@ CMakeFiles\test_restart.dir\tests\test_restart.cpp.obj: "C:\Program Files (x86)\
 
 "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_startup.h":
 
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\unordered_map":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xhash":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xbit_ops.h":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xnode_handle.h":
+
 "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\snp_tracker.hpp":
 
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xtree":
 
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\set":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xnode_handle.h":
 
 "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\wal.hpp":
 

@@ -375,6 +375,7 @@ C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.
 C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/xlocnum
 C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/iterator
 C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/sstream
+C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/kv_cache.hpp
 C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/manifest.hpp
 C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/snp_tracker.hpp
 C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/set

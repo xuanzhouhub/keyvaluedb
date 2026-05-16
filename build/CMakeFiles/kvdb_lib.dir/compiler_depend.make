@@ -453,7 +453,8 @@ CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Vi
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\queue"
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\deque"
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\sstream"
-CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\manifest.hpp"
+CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\kv_cache.hpp"
+CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\list"
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\mutex"
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_chrono.hpp"
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\ratio"
@@ -462,10 +463,14 @@ CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Windows Kits
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_startup.h"
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\math.h"
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vcruntime_startup.h"
+CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\unordered_map"
+CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xhash"
+CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xbit_ops.h"
+CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xnode_handle.h"
+CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\manifest.hpp"
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\snp_tracker.hpp"
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\set"
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xtree"
-CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xnode_handle.h"
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\wal.hpp"
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\condition_variable"
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\shared_mutex"
@@ -482,9 +487,6 @@ CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Vi
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\ostream"
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\map"
 CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\unordered_set"
-CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xhash"
-CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\list"
-CMakeFiles\kvdb_lib.dir\src\engine.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xbit_ops.h"
 
 
 CMakeFiles\kvdb_lib.dir\src\manifest.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\src\manifest.cpp"
@@ -1409,6 +1411,7 @@ CMakeFiles\kvdb_lib.dir\src\server.cpp.obj: "C:\Program Files (x86)\Microsoft Vi
 CMakeFiles\kvdb_lib.dir\src\server.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xlocnum"
 CMakeFiles\kvdb_lib.dir\src\server.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\iterator"
 CMakeFiles\kvdb_lib.dir\src\server.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\sstream"
+CMakeFiles\kvdb_lib.dir\src\server.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\kv_cache.hpp"
 CMakeFiles\kvdb_lib.dir\src\server.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\manifest.hpp"
 CMakeFiles\kvdb_lib.dir\src\server.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\snp_tracker.hpp"
 CMakeFiles\kvdb_lib.dir\src\server.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\set"
@@ -2316,9 +2319,17 @@ CMakeFiles\kvdb_lib.dir\src\wal.cpp.obj: "C:\Program Files (x86)\Windows Kits\10
 
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\deque":
 
+"C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\kv_cache.hpp":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\list":
+
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\thread":
 
 "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\process.h":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\unordered_map":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xhash":
 
 "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\snp_tracker.hpp":
 
@@ -2338,10 +2349,6 @@ CMakeFiles\kvdb_lib.dir\src\wal.cpp.obj: "C:\Program Files (x86)\Windows Kits\10
 
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\iostream":
 
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xhash":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\list":
-
 "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\io.h":
 
 "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_io.h":
@@ -2353,8 +2360,6 @@ CMakeFiles\kvdb_lib.dir\src\wal.cpp.obj: "C:\Program Files (x86)\Windows Kits\10
 "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\server.hpp":
 
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\functional":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\unordered_map":
 
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\future":
 

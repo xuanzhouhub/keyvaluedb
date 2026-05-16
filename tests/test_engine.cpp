@@ -617,6 +617,46 @@ void TestCompactionEmptyLevelsAfterCascade() {
     CleanupTestDir();
 }
 
+void TestKVCacheHit() {
+    CleanupTestDir();
+    {
+        kvdb::LSMTreeEngine engine(kTestDataDir, 4096);
+        engine.Insert("cached", "value");
+        std::string v;
+        ASSERT_TRUE(engine.Lookup("cached", v));
+        ASSERT_STREQ("value", v);
+        ASSERT_TRUE(engine.Lookup("cached", v));
+        ASSERT_STREQ("value", v);
+    }
+    CleanupTestDir();
+}
+
+void TestKVCacheBlobNotCached() {
+    CleanupTestDir();
+    {
+        kvdb::LSMTreeEngine engine(kTestDataDir, 1024 * 1024);
+        std::string big(3000, 'Z');
+        engine.Insert("big", big);
+        std::string v;
+        ASSERT_TRUE(engine.Lookup("big", v));
+        ASSERT_EQ(3000u, v.size());
+    }
+    CleanupTestDir();
+}
+
+void TestKVCacheTombstone() {
+    CleanupTestDir();
+    {
+        kvdb::LSMTreeEngine engine(kTestDataDir, 4096);
+        engine.Insert("k", "val");
+        std::string v;
+        ASSERT_TRUE(engine.Lookup("k", v));
+        engine.Delete("k");
+        ASSERT_FALSE(engine.Lookup("k", v));
+    }
+    CleanupTestDir();
+}
+
 void RunTests() {
     std::cout << "Running LSMTreeEngine Tests...\n\n";
 
@@ -648,6 +688,9 @@ void RunTests() {
     TestCompactionPreservesData();
     TestTombstonePropagatesThroughCompaction();
     TestCompactionEmptyLevelsAfterCascade();
+    TestKVCacheHit();
+    TestKVCacheBlobNotCached();
+    TestKVCacheTombstone();
 }
 
 } // namespace kvdb_test

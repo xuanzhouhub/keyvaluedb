@@ -207,6 +207,8 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
     compaction_ = std::make_unique<CompactionState>();
     compaction_->engine = this;
     compaction_->worker = std::thread([this]() { this->CompactionWorkerLoop(); });
+
+    kv_cache_ = std::make_unique<KVCache>();
 }
 
 LSMTreeEngine::~LSMTreeEngine() {
@@ -341,6 +343,8 @@ void LSMTreeEngine::Insert(const std::string& key, const std::string& value) {
         });
     }
 
+    kv_cache_->Put(key, value, ts);
+
     DrainRecyclePending();
 }
 
@@ -350,6 +354,10 @@ void LSMTreeEngine::Delete(const std::string& key) {
 
 bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const {
     uint64_t read_ts = global_ts_.load();
+
+    if (kv_cache_->Get(key, read_ts, value_out))
+        return !value_out.empty();
+
     tracker_.Acquire(read_ts);
 
     struct Guard {
@@ -358,74 +366,88 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
         ~Guard() { t.Release(ts); }
     } guard{tracker_, read_ts};
 
+    std::string found_val;
+    uint64_t found_ts = 0;
+    auto tryResult = [&](const std::string& val, uint64_t ts) -> bool {
+        if (val.empty()) { found_val = val; found_ts = ts; return true; }
+        found_val = val; found_ts = ts; return true;
+    };
+
+    bool hit = false;
     {
         std::shared_lock<std::shared_mutex> lock(memtable_mutex_);
-        if (active_memtable_->Lookup(key, read_ts, value_out)) {
-            if (value_out.empty()) return false;
-            return true;
-        }
-        for (auto it = frozen_memtables_.rbegin();
-             it != frozen_memtables_.rend(); ++it) {
-            if ((*it)->Lookup(key, read_ts, value_out)) {
-                if (value_out.empty()) return false;
-                return true;
+        if (active_memtable_->Lookup(key, read_ts, found_val)) {
+            hit = true;
+        } else {
+            for (auto it = frozen_memtables_.rbegin();
+                 it != frozen_memtables_.rend(); ++it) {
+                if ((*it)->Lookup(key, read_ts, found_val)) {
+                    hit = true; break;
+                }
             }
         }
     }
 
-    std::unordered_set<uint64_t> scanned_ids;
-    {
-        std::shared_lock<std::shared_mutex> lock(memtable_mutex_);
-        for (const auto& m : frozen_memtables_) {
-            scanned_ids.insert(m->Id());
+    if (!hit) {
+        std::unordered_set<uint64_t> scanned_ids;
+        {
+            std::shared_lock<std::shared_mutex> lock(memtable_mutex_);
+            for (const auto& m : frozen_memtables_)
+                scanned_ids.insert(m->Id());
+        }
+
+        std::vector<SSTable::Metadata> metadata;
+        {
+            std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+            metadata = sstable_metadata_;
+        }
+
+        for (auto it = metadata.rbegin(); it != metadata.rend() && !hit; ++it) {
+            if (it->level != 0) continue;
+            if (scanned_ids.count(it->source_table_id)) continue;
+            if (!it->min_key.empty() && key < it->min_key) continue;
+            if (!it->max_key.empty() && key > it->max_key) continue;
+            if (it->bloom.BitCount() > 0 && !it->bloom.MightContain(key)) continue;
+            try {
+                hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val);
+            } catch (const std::exception&) {}
+        }
+
+        if (!hit) {
+            std::map<int, std::vector<SSTable::Metadata>> levels;
+            for (auto& meta : metadata) {
+                if (meta.level == 0) continue;
+                levels[meta.level].push_back(meta);
+            }
+            for (auto& [lvl, files] : levels) {
+                std::sort(files.begin(), files.end(),
+                          [](const SSTable::Metadata& a, const SSTable::Metadata& b)
+                          { return a.min_key < b.min_key; });
+                auto it = std::lower_bound(files.begin(), files.end(), key,
+                    [](const SSTable::Metadata& m, const std::string& k)
+                    { return m.max_key < k; });
+                if (it == files.end()) continue;
+                if (key < it->min_key || key > it->max_key) continue;
+                if (scanned_ids.count(it->source_table_id)) continue;
+                if (it->bloom.BitCount() > 0 && !it->bloom.MightContain(key)) continue;
+                try {
+                    hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val);
+                } catch (const std::exception&) {}
+                if (hit) break;
+            }
         }
     }
 
-    std::vector<SSTable::Metadata> metadata;
-    {
-        std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
-        metadata = sstable_metadata_;
+    if (!hit) return false;
+
+    if (found_val.empty()) {
+        kv_cache_->Erase(key);
+        return false;
     }
 
-    for (auto it = metadata.rbegin(); it != metadata.rend(); ++it) {
-        if (it->level != 0) continue;
-        if (scanned_ids.count(it->source_table_id)) continue;
-        if (!it->min_key.empty() && key < it->min_key) continue;
-        if (!it->max_key.empty() && key > it->max_key) continue;
-        if (it->bloom.BitCount() > 0 && !it->bloom.MightContain(key)) continue;
-        try {
-            if (SSTable::LookupKey(it->filepath, key, read_ts, value_out)) {
-                if (value_out.empty()) return false;
-                return true;
-            }
-        } catch (const std::exception&) { continue; }
-    }
-
-    std::map<int, std::vector<SSTable::Metadata>> levels;
-    for (auto& meta : metadata) {
-        if (meta.level == 0) continue;
-        levels[meta.level].push_back(meta);
-    }
-    for (auto& [lvl, files] : levels) {
-        std::sort(files.begin(), files.end(),
-                  [](const SSTable::Metadata& a, const SSTable::Metadata& b)
-                  { return a.min_key < b.min_key; });
-        auto it = std::lower_bound(files.begin(), files.end(), key,
-            [](const SSTable::Metadata& m, const std::string& k)
-            { return m.max_key < k; });
-        if (it == files.end()) continue;
-        if (key < it->min_key || key > it->max_key) continue;
-        if (scanned_ids.count(it->source_table_id)) continue;
-        if (it->bloom.BitCount() > 0 && !it->bloom.MightContain(key)) continue;
-        try {
-            if (SSTable::LookupKey(it->filepath, key, read_ts, value_out)) {
-                if (value_out.empty()) return false;
-                return true;
-            }
-        } catch (const std::exception&) { continue; }
-    }
-
-    return false;
+    value_out = found_val;
+    kv_cache_->Put(key, found_val, read_ts);
+    return true;
 }
 
 bool LSMTreeEngine::NeedsFlush() const {
