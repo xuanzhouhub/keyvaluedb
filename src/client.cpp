@@ -115,4 +115,62 @@ bool Client::Read(const std::string& key, std::string& value_out) {
     return false;
 }
 
+bool Client::Delete(const std::string& key) {
+    if (sock_ == kInvalidSocket) return false;
+    unsigned char req = Protocol::kDeleteReq;
+    if (!SendAll(sock_, &req, 1)) return false;
+    if (!SendString(sock_, key)) return false;
+
+    unsigned char resp;
+    if (!RecvAll(sock_, &resp, 1)) return false;
+    return resp == Protocol::kOkResp;
+}
+
+bool Client::RangeScan(const RangeBound& lower, const RangeBound& upper,
+                       std::vector<KeyValuePair>& results) {
+    if (sock_ == kInvalidSocket) return false;
+    unsigned char req = Protocol::kRangeScanReq;
+    if (!SendAll(sock_, &req, 1)) return false;
+    if (!SendRangeBound(sock_, lower)) return false;
+    if (!SendRangeBound(sock_, upper)) return false;
+
+    results.clear();
+    while (true) {
+        unsigned char resp;
+        if (!RecvAll(sock_, &resp, 1)) return false;
+        if (resp == Protocol::kEndResp) return true;
+        if (resp == Protocol::kValueResp) {
+            KeyValuePair kv;
+            if (!RecvString(sock_, kv.key)) return false;
+            if (!RecvString(sock_, kv.value)) return false;
+            results.push_back(std::move(kv));
+            continue;
+        }
+        return false;
+    }
+}
+
+bool Client::PrefixScan(const std::string& prefix,
+                        std::vector<KeyValuePair>& results) {
+    if (sock_ == kInvalidSocket) return false;
+    unsigned char req = Protocol::kPrefixScanReq;
+    if (!SendAll(sock_, &req, 1)) return false;
+    if (!SendString(sock_, prefix)) return false;
+
+    results.clear();
+    while (true) {
+        unsigned char resp;
+        if (!RecvAll(sock_, &resp, 1)) return false;
+        if (resp == Protocol::kEndResp) return true;
+        if (resp == Protocol::kValueResp) {
+            KeyValuePair kv;
+            if (!RecvString(sock_, kv.key)) return false;
+            if (!RecvString(sock_, kv.value)) return false;
+            results.push_back(std::move(kv));
+            continue;
+        }
+        return false;
+    }
+}
+
 } // namespace kvdb

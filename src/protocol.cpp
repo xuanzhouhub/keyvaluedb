@@ -67,4 +67,23 @@ bool RecvString(socket_t sock, std::string& s) {
     return RecvAll(sock, &s[0], len);
 }
 
+bool SendRangeBound(socket_t sock, const RangeBound& bound) {
+    if (bound.IsUnbounded()) {
+        unsigned char flag = 0;
+        return SendAll(sock, &flag, 1);
+    }
+    unsigned char flag = bound.inclusive ? 1 : 2;
+    return SendAll(sock, &flag, 1) && SendString(sock, bound.key);
+}
+
+bool RecvRangeBound(socket_t sock, RangeBound& bound) {
+    unsigned char flag;
+    if (!RecvAll(sock, &flag, 1)) return false;
+    if (flag == 0) { bound = RangeBound::Unbounded(); return true; }
+    std::string key;
+    if (!RecvString(sock, key)) return false;
+    bound = (flag == 1) ? RangeBound::Inclusive(key) : RangeBound::Exclusive(key);
+    return true;
+}
+
 } // namespace kvdb

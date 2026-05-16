@@ -1,5 +1,7 @@
 #pragma once
 
+#include "types.hpp"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -14,12 +16,16 @@
 namespace kvdb {
 
 struct Protocol {
-    static const uint8_t kWriteReq    = 'W';
-    static const uint8_t kReadReq     = 'R';
-    static const uint8_t kOkResp      = 'O';
-    static const uint8_t kValueResp   = 'V';
-    static const uint8_t kNotFoundResp = 'N';
-    static const uint8_t kErrorResp   = 'E';
+    static const uint8_t kWriteReq      = 'W';
+    static const uint8_t kReadReq       = 'R';
+    static const uint8_t kDeleteReq     = 'D';
+    static const uint8_t kRangeScanReq  = 'S';
+    static const uint8_t kPrefixScanReq = 'P';
+    static const uint8_t kOkResp        = 'O';
+    static const uint8_t kValueResp     = 'V';
+    static const uint8_t kNotFoundResp  = 'N';
+    static const uint8_t kErrorResp     = 'E';
+    static const uint8_t kEndResp       = 'E';
 };
 
 #ifdef _WIN32
@@ -42,5 +48,8 @@ bool RecvUint32(socket_t sock, uint32_t& v);
 
 bool SendString(socket_t sock, const std::string& s);
 bool RecvString(socket_t sock, std::string& s);
+
+bool SendRangeBound(socket_t sock, const RangeBound& bound);
+bool RecvRangeBound(socket_t sock, RangeBound& bound);
 
 } // namespace kvdb

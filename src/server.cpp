@@ -195,6 +195,66 @@ void Server::HandleClient(socket_t client_sock) {
                 SendAll(client_sock, &resp, 1);
             }
 
+        } else if (req_type == Protocol::kDeleteReq) {
+            if (!RecvUint32(client_sock, key_len)) break;
+            key.resize(key_len);
+            if (!RecvAll(client_sock, &key[0], key_len)) break;
+
+            WriteRequest req;
+            req.key = std::move(key);
+            req.value.clear();
+            req.client_sock = client_sock;
+            auto future = req.promise.get_future();
+
+            {
+                std::unique_lock<std::mutex> lock(write_queue_mutex_);
+                write_queue_not_full_cv_.wait(lock, [this] {
+                    return queue_bytes_ + 64 <= max_queue_bytes_
+                        || should_stop_.load();
+                });
+                if (should_stop_.load()) break;
+                queue_bytes_ += 64;
+                write_queue_.push(std::move(req));
+            }
+            write_queue_cv_.notify_one();
+
+            bool result = future.get();
+            unsigned char resp = result ? Protocol::kOkResp : Protocol::kErrorResp;
+            SendAll(client_sock, &resp, 1);
+            if (!result) SendString(client_sock, "delete failed");
+
+        } else if (req_type == Protocol::kRangeScanReq) {
+            RangeBound lower, upper;
+            if (!RecvRangeBound(client_sock, lower)) break;
+            if (!RecvRangeBound(client_sock, upper)) break;
+
+            auto iter = engine_.RangeScan(lower, upper);
+            while (iter.Valid()) {
+                unsigned char resp = Protocol::kValueResp;
+                if (!SendAll(client_sock, &resp, 1)) break;
+                if (!SendString(client_sock, iter.Key())) break;
+                if (!SendString(client_sock, iter.Value())) break;
+                iter.Next();
+            }
+            unsigned char end = Protocol::kEndResp;
+            SendAll(client_sock, &end, 1);
+
+        } else if (req_type == Protocol::kPrefixScanReq) {
+            if (!RecvUint32(client_sock, key_len)) break;
+            key.resize(key_len);
+            if (!RecvAll(client_sock, &key[0], key_len)) break;
+
+            auto iter = engine_.PrefixScan(key);
+            while (iter.Valid()) {
+                unsigned char resp = Protocol::kValueResp;
+                if (!SendAll(client_sock, &resp, 1)) break;
+                if (!SendString(client_sock, iter.Key())) break;
+                if (!SendString(client_sock, iter.Value())) break;
+                iter.Next();
+            }
+            unsigned char end = Protocol::kEndResp;
+            SendAll(client_sock, &end, 1);
+
         } else {
             break;
         }
