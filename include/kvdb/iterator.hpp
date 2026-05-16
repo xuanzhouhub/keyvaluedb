@@ -190,12 +190,16 @@ public:
 
     RangeIterator(std::vector<std::unique_ptr<SourceIterator>> sources, uint64_t read_ts,
                   std::shared_ptr<void> guard = {},
-                  const std::string& start_key = "",
-                  const std::string& end_key = "")
+                  const RangeBound& lower = RangeBound::Unbounded(),
+                  const RangeBound& upper = RangeBound::Unbounded())
         : sources_(std::move(sources)), guard_(std::move(guard)), read_ts_(read_ts),
-          start_key_(start_key), end_key_(end_key) {
-        if (!start_key_.empty())
-            for (auto& s : sources_) s->SeekToKey(start_key_);
+          lower_(lower), upper_(upper) {
+        if (!lower_.IsUnbounded())
+            for (auto& s : sources_) s->SeekToKey(lower_.key);
+        if (!lower_.IsUnbounded() && !lower_.inclusive) {
+            for (auto& s : sources_)
+                while (s->Valid() && s->Current().key == lower_.key) s->Next();
+        }
         heap_cmp_.sources = &sources_;
         heap_ = decltype(heap_)(heap_cmp_);
         for (size_t i = 0; i < sources_.size(); ++i)
@@ -218,7 +222,10 @@ private:
             HeapEntry top = heap_.top(); heap_.pop();
             const auto& entry = sources_[top.idx]->Current();
 
-            if (!end_key_.empty() && entry.key > end_key_) { valid_ = false; return; }
+            if (!upper_.IsUnbounded()) {
+                if (upper_.inclusive && entry.key > upper_.key) { valid_ = false; return; }
+                if (!upper_.inclusive && entry.key >= upper_.key) { valid_ = false; return; }
+            }
 
             std::vector<size_t> same_key;
             same_key.push_back(top.idx);
@@ -252,8 +259,8 @@ private:
     HeapCmp heap_cmp_;
     std::priority_queue<HeapEntry, std::vector<HeapEntry>, HeapCmp> heap_{heap_cmp_};
     uint64_t read_ts_ = 0;
-    std::string start_key_;
-    std::string end_key_;
+    RangeBound lower_;
+    RangeBound upper_;
     KeyValuePair current_;
     bool valid_ = false;
 };

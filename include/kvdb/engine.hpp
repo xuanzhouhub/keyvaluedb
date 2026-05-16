@@ -6,6 +6,7 @@
 #include "memtable.hpp"
 #include "snp_tracker.hpp"
 #include "sstable.hpp"
+#include "types.hpp"
 #include "wal.hpp"
 
 #include <atomic>
@@ -58,7 +59,7 @@ public:
     void TrimWAL();
 
     RangeIterator RangeScan() const;
-    RangeIterator RangeScan(const std::string& start, const std::string& end) const;
+    RangeIterator RangeScan(const RangeBound& lower, const RangeBound& upper) const;
 
 private:
     void EnsureDataDirectoryExists();

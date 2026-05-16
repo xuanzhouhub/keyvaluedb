@@ -491,10 +491,10 @@ void LSMTreeEngine::TrimWAL() {
 }
 
 RangeIterator LSMTreeEngine::RangeScan() const {
-    return RangeScan("", "");
+    return RangeScan(RangeBound::Unbounded(), RangeBound::Unbounded());
 }
 
-RangeIterator LSMTreeEngine::RangeScan(const std::string& start, const std::string& end) const {
+RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound& upper) const {
     uint64_t read_ts = global_ts_.load();
     tracker_.Acquire(read_ts);
 
@@ -509,13 +509,13 @@ RangeIterator LSMTreeEngine::RangeScan(const std::string& start, const std::stri
         std::shared_lock<std::shared_mutex> lock(memtable_mutex_);
         if (active_memtable_->EntryCount() > 0) {
             auto vi = std::make_unique<VectorIterator>(active_memtable_->ExportEntries());
-            if (!start.empty()) vi->SeekToKey(start);
+            if (!lower.IsUnbounded()) vi->SeekToKey(lower.key);
             if (vi->Valid()) sources.push_back(std::move(vi));
         }
         for (const auto& m : frozen_memtables_) {
             if (m->EntryCount() > 0) {
                 auto ms = std::make_unique<MemTableSource>(m);
-                if (!start.empty()) ms->SeekToKey(start);
+                if (!lower.IsUnbounded()) ms->SeekToKey(lower.key);
                 if (ms->Valid()) sources.push_back(std::move(ms));
             }
         }
@@ -525,19 +525,17 @@ RangeIterator LSMTreeEngine::RangeScan(const std::string& start, const std::stri
         std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
         std::map<int, std::vector<SSTable::Metadata>> groups;
         for (const auto& meta : sstable_metadata_) {
+            if (!upper.IsUnbounded() && !meta.min_key.empty() && meta.min_key > upper.key) continue;
+            if (!lower.IsUnbounded() && !meta.max_key.empty() && meta.max_key < lower.key) continue;
             if (meta.level == 0) {
-                if (!end.empty() && !meta.min_key.empty() && meta.min_key > end) continue;
-                if (!start.empty() && !meta.max_key.empty() && meta.max_key < start) continue;
                 try {
                     auto iter = std::make_unique<SSTableIterator>(meta.filepath);
                     if (iter->Valid()) {
-                        if (!start.empty()) iter->SeekToKey(start);
+                        if (!lower.IsUnbounded()) iter->SeekToKey(lower.key);
                         if (iter->Valid()) sources.push_back(std::move(iter));
                     }
                 } catch (...) {}
             } else {
-                if (!end.empty() && !meta.min_key.empty() && meta.min_key > end) continue;
-                if (!start.empty() && !meta.max_key.empty() && meta.max_key < start) continue;
                 groups[meta.level].push_back(meta);
             }
         }
@@ -545,14 +543,14 @@ RangeIterator LSMTreeEngine::RangeScan(const std::string& start, const std::stri
             try {
                 auto li = std::make_unique<LevelIterator>(files);
                 if (li->Valid()) {
-                    if (!start.empty()) li->SeekToKey(start);
+                    if (!lower.IsUnbounded()) li->SeekToKey(lower.key);
                     if (li->Valid()) sources.push_back(std::move(li));
                 }
             } catch (...) {}
         }
     }
 
-    return RangeIterator(std::move(sources), read_ts, guard, start, end);
+    return RangeIterator(std::move(sources), read_ts, guard, lower, upper);
 }
 
 void LSMTreeEngine::EnsureDataDirectoryExists() {
