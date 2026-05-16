@@ -3,6 +3,7 @@
 #include "config.hpp"
 #include "iterator.hpp"
 #include "kv_cache.hpp"
+#include "block_cache.hpp"
 #include "manifest.hpp"
 #include "memtable.hpp"
 #include "snp_tracker.hpp"
@@ -102,6 +103,7 @@ private:
     std::unique_ptr<FlushState> flush_;
     std::unique_ptr<CompactionState> compaction_;
     mutable std::unique_ptr<KVCache> kv_cache_;
+    std::unique_ptr<SSTableCache> sst_cache_;
 
     std::vector<PendingRecycle> pending_recycle_;
     std::mutex pending_recycle_mutex_;

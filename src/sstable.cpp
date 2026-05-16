@@ -1,4 +1,5 @@
 #include "kvdb/sstable.hpp"
+#include "kvdb/block_cache.hpp"
 #include "kvdb/config.hpp"
 #include "kvdb/internal/crc32.hpp"
 #include "kvdb/iterator.hpp"
@@ -50,7 +51,8 @@ public:
     const std::vector<SerializedEntry>& Entries() const { return entries_; }
     void Reset() { entries_.clear(); data_size_ = 0; count_ = 0; }
 
-    void FreezeBlock(std::vector<char>& out, BloomFilter& bloom) {
+    void FreezeBlock(std::vector<char>& out, BloomFilter& bloom,
+                     std::string* uncompressed_out = nullptr) {
         uint32_t n = Count();
         std::vector<char> buf; buf.reserve(4 + Entries().size() * 24);
         auto p32=[&](uint32_t v){buf.push_back(char(v&0xFF));buf.push_back(char((v>>8)&0xFF));buf.push_back(char((v>>16)&0xFF));buf.push_back(char((v>>24)&0xFF));};
@@ -63,6 +65,7 @@ public:
             p32(e.value_len); buf.insert(buf.end(), v, v + e.value_len);
             p64(e.timestamp); bloom.Add(std::string(k, e.key_len));
         }
+        if (uncompressed_out) uncompressed_out->assign(buf.begin(), buf.end());
         std::vector<char> comp; comp.swap(buf); CompressBlock(comp);
         CRC32 crc; crc.Update(comp.data(), comp.size());
         out.clear();
@@ -141,10 +144,10 @@ void SSTable::Write(const std::string& filepath, const std::vector<KeyValuePair>
 }
 
 void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk& walk,
-                            size_t entry_count) {
+                            size_t entry_count, SSTableCache* cache) {
     BloomFilter bloom(entry_count > 0 ? entry_count : 1, 0.01);
     BlockBuilder builder(Config::kSSTableBlockSize);
-    struct BlockData { std::vector<char> data; std::string first_key; };
+    struct BlockData { std::vector<char> data; std::string first_key; std::string uncompressed; };
     std::vector<BlockData> blocks;
     std::string min_key, max_key, prev_key, best_val, block_first_key;
     uint64_t best_ts = 0; bool has_best = false; size_t written = 0;
@@ -160,7 +163,8 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
         if (builder.Count() == 0) block_first_key = prev_key;
         while (!builder.TryAppend(se, builder.Count() == 0)) {
             BlockData bd; bd.first_key = block_first_key;
-            builder.FreezeBlock(bd.data, bloom); blocks.push_back(std::move(bd));
+            builder.FreezeBlock(bd.data, bloom, &bd.uncompressed);
+            blocks.push_back(std::move(bd));
             builder.Reset(); block_first_key = prev_key;
         }
         if (min_key.empty()) min_key = prev_key;
@@ -180,7 +184,7 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
     }
     flushBest();
     if (builder.Count() > 0) {
-        BlockData bd; builder.FreezeBlock(bd.data, bloom); blocks.push_back(std::move(bd));
+        BlockData bd; builder.FreezeBlock(bd.data, bloom, &bd.uncompressed); blocks.push_back(std::move(bd));
     }
 
     std::ofstream file(filepath, std::ios::binary | std::ios::trunc);
@@ -194,10 +198,14 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
     file.put(static_cast<char>(mxl&0xFF)); file.put(static_cast<char>((mxl>>8)&0xFF));
 
     std::vector<uint64_t> offsets; std::vector<std::string> fkeys;
-    for (auto& bd : blocks) {
+    for (size_t bi = 0; bi < blocks.size(); ++bi) {
+        auto& bd = blocks[bi];
         offsets.push_back(static_cast<uint64_t>(file.tellp()));
         file.write(bd.data.data(), static_cast<std::streamsize>(bd.data.size()));
         fkeys.push_back(std::move(bd.first_key));
+        if (cache && !bd.uncompressed.empty())
+            cache->PutBlock(filepath, static_cast<uint32_t>(bi),
+                            bd.uncompressed, 0);
     }
 
     uint64_t filter_off = static_cast<uint64_t>(file.tellp());
@@ -218,7 +226,13 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
     WriteUint64LE(file, filter_off); WriteUint32LE(file, Config::kSSTableFooterMagic);
 }
 
-SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath) {
+SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
+                                        SSTableCache* cache) {
+    if (cache) {
+        Metadata cached;
+        if (cache->GetMetadata(filepath, cached))
+            return cached;
+    }
     std::ifstream file(filepath,std::ios::binary);
     if(!file.is_open())throw std::runtime_error("SSTable open: "+filepath);
     Metadata meta; meta.filepath=filepath;
@@ -249,6 +263,7 @@ SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath) {
     meta.block_first_keys.resize(bc);
     for(uint32_t i=0;i<bc;++i){uint16_t kl=static_cast<uint16_t>(ReadUint16LE(file));meta.block_first_keys[i].resize(kl);if(kl>0)file.read(&meta.block_first_keys[i][0],kl);}
     file.seekg(0,std::ios::end);meta.file_size=static_cast<uint64_t>(file.tellg());
+    if (cache) cache->PutMetadata(filepath, meta);
     return meta;
 }
 
@@ -273,13 +288,26 @@ std::vector<KeyValuePair> SSTable::ReadAll(const std::string& filepath) {
     return entries;
 }
 
-bool SSTable::LookupKey(const std::string& filepath, const std::string& key, uint64_t read_ts, std::string& value_out) {
-    auto meta=ReadMetadata(filepath);
+bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
+                         uint64_t read_ts, std::string& value_out,
+                         SSTableCache* cache) {
+    auto meta=ReadMetadata(filepath, cache);
     if(meta.block_first_keys.empty())return false;
     uint32_t target=0;
     for(uint32_t i=0;i<meta.block_first_keys.size();++i){if(key<meta.block_first_keys[i])break;target=i;}
     auto search=[&](uint32_t idx)->bool{
         if(idx>=meta.block_offsets.size())return false;
+        if (cache) {
+            std::string block_data;
+            uint32_t entry_count;
+            if (cache->GetBlock(filepath, idx, block_data, entry_count)) {
+                std::istringstream bs(std::move(block_data));
+                auto r32=[&](){uint32_t v=0;v|=uint8_t(bs.get());v|=uint8_t(bs.get())<<8;v|=uint8_t(bs.get())<<16;v|=uint8_t(bs.get())<<24;return v;};
+                uint32_t n=r32();
+                for(uint32_t i=0;i<n;++i){uint32_t kl=r32();std::string k(kl,0);bs.read(&k[0],kl);uint32_t vl=r32();std::string v(vl,0);bs.read(&v[0],vl);uint64_t ts=0;for(int b=0;b<8;++b)ts|=static_cast<uint64_t>(static_cast<uint8_t>(bs.get()))<<(b*8);if(k==key&&ts<=read_ts){value_out=std::move(v);return true;}}
+                return false;
+            }
+        }
         std::ifstream f(filepath,std::ios::binary);
         f.seekg(static_cast<std::streamoff>(meta.block_offsets[idx]));
         ReadUint32LE(f);f.seekg(1,std::ios::cur);

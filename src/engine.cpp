@@ -180,7 +180,7 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
         for (auto& meta : sstable_metadata_) {
             if (meta.min_key.empty() || meta.max_key.empty()) {
                 try {
-                    auto full = SSTable::ReadMetadata(meta.filepath);
+                    auto full = SSTable::ReadMetadata(meta.filepath, sst_cache_.get());
                     meta.min_key = std::move(full.min_key);
                     meta.max_key = std::move(full.max_key);
                     meta.bloom = std::move(full.bloom);
@@ -209,6 +209,7 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
     compaction_->worker = std::thread([this]() { this->CompactionWorkerLoop(); });
 
     kv_cache_ = std::make_unique<KVCache>();
+    sst_cache_ = std::make_unique<SSTableCache>();
 }
 
 LSMTreeEngine::~LSMTreeEngine() {
@@ -409,7 +410,7 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
             if (!it->max_key.empty() && key > it->max_key) continue;
             if (it->bloom.BitCount() > 0 && !it->bloom.MightContain(key)) continue;
             try {
-                hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val);
+                hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val, sst_cache_.get());
             } catch (const std::exception&) {}
         }
 
@@ -431,7 +432,7 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
                 if (scanned_ids.count(it->source_table_id)) continue;
                 if (it->bloom.BitCount() > 0 && !it->bloom.MightContain(key)) continue;
                 try {
-                    hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val);
+                    hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val, sst_cache_.get());
                 } catch (const std::exception&) {}
                 if (hit) break;
             }
@@ -601,11 +602,11 @@ void LSMTreeEngine::DoFlush(std::shared_ptr<MemTable> frozen_memtable) {
 
     size_t entry_count = frozen_memtable->EntryCount();
     auto walk = BPlusTree::MemTableWalk(frozen_memtable->GetTree());
-    SSTable::WriteFromWalk(filepath, walk, entry_count);
+    SSTable::WriteFromWalk(filepath, walk, entry_count, sst_cache_.get());
 
     SSTable::Metadata meta;
     try {
-        meta = SSTable::ReadMetadata(filepath);
+        meta = SSTable::ReadMetadata(filepath, sst_cache_.get());
     } catch (const std::exception& e) {
         std::cerr << "ReadMetadata failed: " << e.what() << std::endl;
         auto entries = SSTable::ReadAll(filepath);
@@ -703,6 +704,7 @@ void LSMTreeEngine::CompactLevel(int from_level, int top_level) {
     manifest_->Sync();
 
     for (auto& f : garbage) {
+        sst_cache_->Invalidate(f);
         std::error_code ec;
         std::filesystem::remove(f, ec);
     }
