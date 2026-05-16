@@ -65,6 +65,10 @@
 - **Visibility**: New SSTables are written, manifest is updated atomically (remove old, add new), old files are garbage-collected.
 - **Concurrency**: Compaction uses `sstable_metadata_mutex_` for atomic swap. Flush worker writes to Level 0 concurrently.
 
+### Caching
+- **KV Cache** (`kv_cache.hpp`): LRU key-value cache for point lookups. Write-through (populated after WAL sync). Tombstones erase cache entries. Blobs (> 2KB) are not cached. Default: 10K entries / 16MB.
+- **SSTable Cache** (`block_cache.hpp`): LRU cache for SSTable metadata (headers, bloom, block index) and uncompressed data blocks. Serves both reads (read-through) and writes (blocks populated during flush). Old SSTable entries invalidated on compaction GC. Default: 1024 blocks / 256 metadata / 64MB.
+
 ### Server/Client
 - TCP server: connection-per-client threads, single writer queue, concurrent reads via MVCC.
 - Binary protocol: `W + key + value` (write), `R + key` (read), `O/V/N/E` (responses).
@@ -127,5 +131,4 @@ keyvaluedb/
 ## Pending Steps (DO NOT start unless user explicitly asks)
 | Step | Feature | Status |
 |------|---------|--------|
-| 6 | Compaction (level-based SSTable merging) | **Done** |
-| 7 | Atomicity / batch writes | Not started |
+| 7 | Caching — KV Cache + SSTable Cache | **Done** |

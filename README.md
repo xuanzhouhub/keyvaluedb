@@ -107,7 +107,8 @@ SSTable files use a **block-structured binary layout** with per-block CRC32 chec
 | Compaction           | Done        |
 | Delete / Tombstone   | Done        |
 | Prefix scan          | Done        |
-| Batch writes         | Pending     |
+| KV Cache (LRU)       | Done        |
+| SSTable Cache (LRU)  | Done        |
 
 ## Documentation
 
