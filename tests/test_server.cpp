@@ -184,6 +184,116 @@ void TestBinaryData() {
     Cleanup();
 }
 
+void TestClientDelete() {
+    Cleanup();
+    {
+        kvdb::LSMTreeEngine engine(kTestDir, 1024 * 1024);
+        kvdb::Server server(engine, kTestPort);
+        server.Start();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        kvdb::Client client;
+        ASSERT_TRUE(client.Connect("127.0.0.1", kTestPort));
+
+        ASSERT_TRUE(client.Write("k", "v"));
+        std::string val;
+        ASSERT_TRUE(client.Read("k", val));
+        ASSERT_STREQ("v", val);
+
+        ASSERT_TRUE(client.Delete("k"));
+        ASSERT_FALSE(client.Read("k", val));
+
+        client.Disconnect();
+        server.Stop();
+    }
+    Cleanup();
+}
+
+void TestClientRangeScan() {
+    Cleanup();
+    {
+        kvdb::LSMTreeEngine engine(kTestDir, 1024 * 1024);
+        kvdb::Server server(engine, kTestPort);
+        server.Start();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        kvdb::Client client;
+        ASSERT_TRUE(client.Connect("127.0.0.1", kTestPort));
+
+        ASSERT_TRUE(client.Write("a", "1"));
+        ASSERT_TRUE(client.Write("b", "2"));
+        ASSERT_TRUE(client.Write("c", "3"));
+        ASSERT_TRUE(client.Write("d", "4"));
+
+        std::vector<kvdb::KeyValuePair> results;
+        ASSERT_TRUE(client.RangeScan(
+            kvdb::RangeBound::Inclusive("b"),
+            kvdb::RangeBound::Inclusive("c"), results));
+        ASSERT_EQ(2u, results.size());
+        ASSERT_STREQ("b", results[0].key);
+        ASSERT_STREQ("c", results[1].key);
+
+        client.Disconnect();
+        server.Stop();
+    }
+    Cleanup();
+}
+
+void TestClientPrefixScan() {
+    Cleanup();
+    {
+        kvdb::LSMTreeEngine engine(kTestDir, 1024 * 1024);
+        kvdb::Server server(engine, kTestPort);
+        server.Start();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        kvdb::Client client;
+        ASSERT_TRUE(client.Connect("127.0.0.1", kTestPort));
+
+        ASSERT_TRUE(client.Write("user:1", "alice"));
+        ASSERT_TRUE(client.Write("user:2", "bob"));
+        ASSERT_TRUE(client.Write("other", "xxx"));
+
+        std::vector<kvdb::KeyValuePair> results;
+        ASSERT_TRUE(client.PrefixScan("user:", results));
+        ASSERT_EQ(2u, results.size());
+        ASSERT_STREQ("user:1", results[0].key);
+        ASSERT_STREQ("user:2", results[1].key);
+
+        client.Disconnect();
+        server.Stop();
+    }
+    Cleanup();
+}
+
+void TestClientRangeScanExclusive() {
+    Cleanup();
+    {
+        kvdb::LSMTreeEngine engine(kTestDir, 1024 * 1024);
+        kvdb::Server server(engine, kTestPort);
+        server.Start();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        kvdb::Client client;
+        ASSERT_TRUE(client.Connect("127.0.0.1", kTestPort));
+
+        ASSERT_TRUE(client.Write("a", "1"));
+        ASSERT_TRUE(client.Write("b", "2"));
+        ASSERT_TRUE(client.Write("c", "3"));
+
+        std::vector<kvdb::KeyValuePair> results;
+        ASSERT_TRUE(client.RangeScan(
+            kvdb::RangeBound::Exclusive("a"),
+            kvdb::RangeBound::Exclusive("c"), results));
+        ASSERT_EQ(1u, results.size());
+        ASSERT_STREQ("b", results[0].key);
+
+        client.Disconnect();
+        server.Stop();
+    }
+    Cleanup();
+}
+
 void RunTests() {
     std::cout << "Running Server Tests...\n\n";
 
@@ -193,6 +303,10 @@ void RunTests() {
     TestOverwrite();
     TestMultipleClients();
     TestBinaryData();
+    TestClientDelete();
+    TestClientRangeScan();
+    TestClientPrefixScan();
+    TestClientRangeScanExclusive();
 }
 
 } // namespace kvdb_test

@@ -104,7 +104,9 @@ SSTable files use a **block-structured binary layout** with per-block CRC32 chec
 | TCP Server/Client    | Done        |
 | Manifest (catalog)   | Done        |
 | Fuzz test (recovery) | Done        |
-| Compaction           | Pending     |
+| Compaction           | Done        |
+| Delete / Tombstone   | Done        |
+| Prefix scan          | Done        |
 | Batch writes         | Pending     |
 
 ## Documentation

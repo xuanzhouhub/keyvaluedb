@@ -5,6 +5,7 @@ CMakeFiles/kvdb_lib.dir/src/client.cpp.obj
  C:/Users/lenovo/Documents/AI Coding/keyvaluedb/src/client.cpp
  C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/client.hpp
  C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/protocol.hpp
+ C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/types.hpp
  C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/cstdint
  C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/yvals_core.h
  C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/vcruntime.h
@@ -1124,6 +1125,7 @@ CMakeFiles/kvdb_lib.dir/src/server.cpp.obj
  C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/cctype
  C:/Program Files (x86)/Windows Kits/10/include/10.0.26100.0/ucrt/ctype.h
  C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/protocol.hpp
+ C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/types.hpp
  C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/vector
  C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/__msvc_bit_utils.hpp
  C:/Program Files (x86)/Windows Kits/10/include/10.0.26100.0/um/winsock2.h
@@ -1387,7 +1389,6 @@ CMakeFiles/kvdb_lib.dir/src/server.cpp.obj
  C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/engine.hpp
  C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/iterator.hpp
  C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/bptree.hpp
- C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/types.hpp
  C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/memtable.hpp
  C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/snappy.hpp
  C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/sstable.hpp
