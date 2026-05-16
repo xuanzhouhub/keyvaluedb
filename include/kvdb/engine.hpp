@@ -60,6 +60,7 @@ public:
 
     RangeIterator RangeScan() const;
     RangeIterator RangeScan(const RangeBound& lower, const RangeBound& upper) const;
+    RangeIterator PrefixScan(const std::string& prefix) const;
 
 private:
     void EnsureDataDirectoryExists();

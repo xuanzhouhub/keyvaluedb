@@ -553,6 +553,16 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
     return RangeIterator(std::move(sources), read_ts, guard, lower, upper);
 }
 
+RangeIterator LSMTreeEngine::PrefixScan(const std::string& prefix) const {
+    std::string upper = prefix;
+    while (!upper.empty() && static_cast<unsigned char>(upper.back()) == 0xFF)
+        upper.pop_back();
+    if (upper.empty())
+        return RangeScan(RangeBound::Inclusive(prefix), RangeBound::Unbounded());
+    upper.back() = static_cast<char>(static_cast<unsigned char>(upper.back()) + 1);
+    return RangeScan(RangeBound::Inclusive(prefix), RangeBound::Exclusive(upper));
+}
+
 void LSMTreeEngine::EnsureDataDirectoryExists() {
     std::filesystem::create_directories(data_dir_);
 }
