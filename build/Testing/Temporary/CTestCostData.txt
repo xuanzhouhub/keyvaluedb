@@ -1,10 +1,10 @@
-test_memtable 3 0.0134874
-test_sstable 3 0.150406
-test_engine 3 8.96846
-test_wal 3 0.024152
-test_manifest 3 0.0166094
-test_server 3 0.463935
-test_wfw 3 0.0138568
-test_small 3 0.0158861
-test_restart 3 0.0241948
+test_memtable 7 0.00445626
+test_sstable 7 0.0645838
+test_engine 4 6.879
+test_wal 7 0.0257907
+test_manifest 7 0.00711901
+test_server 7 0.220173
+test_wfw 7 0.00441591
+test_small 7 0.00567033
+test_restart 4 0.0243814
 ---
