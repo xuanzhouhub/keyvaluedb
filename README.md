@@ -109,6 +109,7 @@ SSTable files use a **block-structured binary layout** with per-block CRC32 chec
 | Prefix scan          | Done        |
 | KV Cache (LRU)       | Done        |
 | SSTable Cache (LRU)  | Done        |
+| Tombstones (v5)      | Done        |
 
 ## Documentation
 

@@ -1,10 +1,10 @@
-Start testing: May 18 18:10 中国标准时间
+Start testing: May 18 18:31 中国标准时间
 ----------------------------------------------------------
 1/9 Testing: test_memtable
 1/9 Test: test_memtable
 Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_memtable.exe"
 Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
-"test_memtable" start time: May 18 18:10 中国标准时间
+"test_memtable" start time: May 18 18:31 中国标准时间
 Output:
 ----------------------------------------------------------
 Running MemTable Tests...
@@ -15,10 +15,10 @@ Total:  195
 Passed: 195
 Failed: 0
 <end of output>
-Test time =   0.03 sec
+Test time =   0.01 sec
 ----------------------------------------------------------
 Test Passed.
-"test_memtable" end time: May 18 18:10 中国标准时间
+"test_memtable" end time: May 18 18:31 中国标准时间
 "test_memtable" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -26,7 +26,7 @@ Test Passed.
 2/9 Test: test_sstable
 Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_sstable.exe"
 Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
-"test_sstable" start time: May 18 18:10 中国标准时间
+"test_sstable" start time: May 18 18:31 中国标准时间
 Output:
 ----------------------------------------------------------
 Running SSTable Tests...
@@ -37,10 +37,10 @@ Total:  3167
 Passed: 3167
 Failed: 0
 <end of output>
-Test time =   0.45 sec
+Test time =   0.43 sec
 ----------------------------------------------------------
 Test Passed.
-"test_sstable" end time: May 18 18:10 中国标准时间
+"test_sstable" end time: May 18 18:31 中国标准时间
 "test_sstable" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -48,7 +48,7 @@ Test Passed.
 3/9 Test: test_engine
 Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_engine.exe"
 Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
-"test_engine" start time: May 18 18:10 中国标准时间
+"test_engine" start time: May 18 18:31 中国标准时间
 Output:
 ----------------------------------------------------------
 Running LSMTreeEngine Tests...
@@ -90,18 +90,18 @@ Total:  1220
 Passed: 1220
 Failed: 0
 <end of output>
-Test time =  27.92 sec
+Test time =  19.39 sec
 ----------------------------------------------------------
 Test Passed.
-"test_engine" end time: May 18 18:10 中国标准时间
-"test_engine" time elapsed: 00:00:27
+"test_engine" end time: May 18 18:31 中国标准时间
+"test_engine" time elapsed: 00:00:19
 ----------------------------------------------------------
 
 4/9 Testing: test_wal
 4/9 Test: test_wal
 Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_wal.exe"
 Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
-"test_wal" start time: May 18 18:10 中国标准时间
+"test_wal" start time: May 18 18:31 中国标准时间
 Output:
 ----------------------------------------------------------
 Running WAL Tests...
@@ -112,10 +112,10 @@ Total:  234
 Passed: 234
 Failed: 0
 <end of output>
-Test time =   0.07 sec
+Test time =   0.04 sec
 ----------------------------------------------------------
 Test Passed.
-"test_wal" end time: May 18 18:10 中国标准时间
+"test_wal" end time: May 18 18:31 中国标准时间
 "test_wal" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -123,7 +123,7 @@ Test Passed.
 5/9 Test: test_manifest
 Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_manifest.exe"
 Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
-"test_manifest" start time: May 18 18:10 中国标准时间
+"test_manifest" start time: May 18 18:31 中国标准时间
 Output:
 ----------------------------------------------------------
 Running Manifest Tests...
@@ -134,10 +134,10 @@ Total:  22
 Passed: 22
 Failed: 0
 <end of output>
-Test time =   0.05 sec
+Test time =   0.02 sec
 ----------------------------------------------------------
 Test Passed.
-"test_manifest" end time: May 18 18:10 中国标准时间
+"test_manifest" end time: May 18 18:31 中国标准时间
 "test_manifest" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -145,7 +145,7 @@ Test Passed.
 6/9 Test: test_server
 Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_server.exe"
 Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
-"test_server" start time: May 18 18:10 中国标准时间
+"test_server" start time: May 18 18:31 中国标准时间
 Output:
 ----------------------------------------------------------
 Running Server Tests...
@@ -166,10 +166,10 @@ Total:  236
 Passed: 236
 Failed: 0
 <end of output>
-Test time =   1.46 sec
+Test time =   1.36 sec
 ----------------------------------------------------------
 Test Passed.
-"test_server" end time: May 18 18:10 中国标准时间
+"test_server" end time: May 18 18:31 中国标准时间
 "test_server" time elapsed: 00:00:01
 ----------------------------------------------------------
 
@@ -177,16 +177,16 @@ Test Passed.
 7/9 Test: test_wfw
 Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_wfw.exe"
 Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
-"test_wfw" start time: May 18 18:10 中国标准时间
+"test_wfw" start time: May 18 18:31 中国标准时间
 Output:
 ----------------------------------------------------------
 ReadMetadata OK: entry_count=100 blocks=1 min_key=k0 max_key=k99
 test_wfw PASSED
 <end of output>
-Test time =   0.03 sec
+Test time =   0.02 sec
 ----------------------------------------------------------
 Test Passed.
-"test_wfw" end time: May 18 18:10 中国标准时间
+"test_wfw" end time: May 18 18:31 中国标准时间
 "test_wfw" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -194,17 +194,17 @@ Test Passed.
 8/9 Test: test_small
 Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_small.exe"
 Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
-"test_small" start time: May 18 18:10 中国标准时间
+"test_small" start time: May 18 18:31 中国标准时间
 Output:
 ----------------------------------------------------------
 ReadMetadata OK: entry_count=500 blocks=4
 ReadAll: 500 entries
 PASSED
 <end of output>
-Test time =   0.04 sec
+Test time =   0.02 sec
 ----------------------------------------------------------
 Test Passed.
-"test_small" end time: May 18 18:10 中国标准时间
+"test_small" end time: May 18 18:31 中国标准时间
 "test_small" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -212,7 +212,7 @@ Test Passed.
 9/9 Test: test_restart
 Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_restart.exe"
 Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
-"test_restart" start time: May 18 18:10 中国标准时间
+"test_restart" start time: May 18 18:31 中国标准时间
 Output:
 ----------------------------------------------------------
 --- Phase 1: Write ---
@@ -233,11 +233,11 @@ Output:
 
 PASSED
 <end of output>
-Test time =   0.10 sec
+Test time =   0.06 sec
 ----------------------------------------------------------
 Test Passed.
-"test_restart" end time: May 18 18:10 中国标准时间
+"test_restart" end time: May 18 18:31 中国标准时间
 "test_restart" time elapsed: 00:00:00
 ----------------------------------------------------------
 
-End testing: May 18 18:10 中国标准时间
+End testing: May 18 18:31 中国标准时间
