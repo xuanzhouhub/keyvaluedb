@@ -8,7 +8,6 @@ C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/CMakeFiles/test_server.dir
 C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/CMakeFiles/test_wfw.dir
 C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/CMakeFiles/test_small.dir
 C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/CMakeFiles/test_restart.dir
-C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/CMakeFiles/test_fuzz.dir
 C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/CMakeFiles/test.dir
 C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/CMakeFiles/edit_cache.dir
 C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/CMakeFiles/rebuild_cache.dir

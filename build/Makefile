@@ -245,19 +245,6 @@ test_restart\fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_restart.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_restart.dir\build
 .PHONY : test_restart\fast
 
-#=============================================================================
-# Target rules for targets named test_fuzz
-
-# Build rule for target.
-test_fuzz: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\Makefile2 /nologo -$(MAKEFLAGS) test_fuzz
-.PHONY : test_fuzz
-
-# fast build rule for target.
-test_fuzz\fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_fuzz.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_fuzz.dir\build
-.PHONY : test_fuzz\fast
-
 src\client.obj: src\client.cpp.obj
 .PHONY : src\client.obj
 
@@ -474,30 +461,6 @@ tests\test_engine.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_engine.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_engine.dir\tests\test_engine.cpp.s
 .PHONY : tests\test_engine.cpp.s
 
-tests\test_fuzz.obj: tests\test_fuzz.cpp.obj
-.PHONY : tests\test_fuzz.obj
-
-# target to build an object file
-tests\test_fuzz.cpp.obj:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_fuzz.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj
-.PHONY : tests\test_fuzz.cpp.obj
-
-tests\test_fuzz.i: tests\test_fuzz.cpp.i
-.PHONY : tests\test_fuzz.i
-
-# target to preprocess a source file
-tests\test_fuzz.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_fuzz.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.i
-.PHONY : tests\test_fuzz.cpp.i
-
-tests\test_fuzz.s: tests\test_fuzz.cpp.s
-.PHONY : tests\test_fuzz.s
-
-# target to generate assembly for a file
-tests\test_fuzz.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_fuzz.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.s
-.PHONY : tests\test_fuzz.cpp.s
-
 tests\test_manifest.obj: tests\test_manifest.cpp.obj
 .PHONY : tests\test_manifest.obj
 
@@ -701,7 +664,6 @@ help:
 	@echo ... test
 	@echo ... kvdb_lib
 	@echo ... test_engine
-	@echo ... test_fuzz
 	@echo ... test_manifest
 	@echo ... test_memtable
 	@echo ... test_restart
@@ -737,9 +699,6 @@ help:
 	@echo ... tests/test_engine.obj
 	@echo ... tests/test_engine.i
 	@echo ... tests/test_engine.s
-	@echo ... tests/test_fuzz.obj
-	@echo ... tests/test_fuzz.i
-	@echo ... tests/test_fuzz.s
 	@echo ... tests/test_manifest.obj
 	@echo ... tests/test_manifest.i
 	@echo ... tests/test_manifest.s
