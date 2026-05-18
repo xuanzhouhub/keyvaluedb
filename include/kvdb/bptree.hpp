@@ -17,7 +17,7 @@ class BPlusTree {
 public:
     static constexpr size_t kPageSize = 4096;
     static constexpr size_t kInternalFanout = 16;
-    static constexpr uint16_t kLargeValFlag = 0xFFFF;
+    static constexpr uint16_t kLargeValFlag = 0x7FFF;
 
     struct alignas(4096) LeafPage {
         uint32_t count       = 0;
@@ -37,11 +37,14 @@ public:
 
         uint16_t Offset(uint32_t i) const { uint16_t v; std::memcpy(&v, Slot(i), 2); return v; }
         uint16_t KeyLen(uint32_t i) const { uint16_t v; std::memcpy(&v, Slot(i)+2, 2); return v; }
-        uint16_t ValLen(uint32_t i) const { uint16_t v; std::memcpy(&v, Slot(i)+4, 2); return v; }
+        uint16_t ValLen(uint32_t i) const { uint16_t v; std::memcpy(&v, Slot(i)+4, 2); return v & 0x7FFF; }
+        bool IsTombstone(uint32_t i) const { uint16_t v; std::memcpy(&v, Slot(i)+4, 2); return v != kLargeValFlag && (v & 0x8000) != 0; }
         uint64_t Timestamp(uint32_t i) const { uint64_t v; std::memcpy(&v, Slot(i)+6, 8); return v; }
-        void SetSlot(uint32_t i, uint16_t off, uint16_t klen, uint16_t vlen, uint64_t ts) {
+        void SetSlot(uint32_t i, uint16_t off, uint16_t klen, uint16_t vlen, uint64_t ts,
+                     bool tomb = false) {
+            uint16_t ev = tomb ? (vlen | 0x8000) : vlen;
             std::memcpy(Slot(i), &off, 2); std::memcpy(Slot(i)+2, &klen, 2);
-            std::memcpy(Slot(i)+4, &vlen, 2); std::memcpy(Slot(i)+6, &ts, 8);
+            std::memcpy(Slot(i)+4, &ev, 2); std::memcpy(Slot(i)+6, &ts, 8);
         }
         const char* Rec(uint32_t i) const { return Raw() + Offset(i); }
         char* Rec(uint32_t i) { return Raw() + Offset(i); }
@@ -63,7 +66,7 @@ public:
 
         bool InsertEntry(uint32_t pos, const std::string& key,
                          const std::string& value, uint64_t timestamp,
-                         bool store_blob);
+                         bool store_blob, bool is_tombstone = false);
     };
 
     struct InternalNode {
@@ -87,7 +90,7 @@ public:
     BPlusTree();
     ~BPlusTree();
 
-    void Insert(const std::string& key, const std::string& value, uint64_t timestamp);
+    void Insert(const std::string& key, const std::string& value, uint64_t timestamp, bool is_tombstone = false);
     bool Lookup(const std::string& key, uint64_t read_ts, std::string& value_out) const;
     void Export(std::vector<KeyValuePair>& out) const;
     size_t Size() const { return count_; }
@@ -102,6 +105,7 @@ public:
         const std::string& Key() const { return current_.key; }
         const std::string& Value() const { return current_.value; }
         uint64_t Timestamp() const { return current_.timestamp; }
+        bool IsTombstone() const { return current_.is_tombstone; }
 
     private:
         void Load();
@@ -195,7 +199,7 @@ inline BPlusTree::~BPlusTree() {
 
 inline bool BPlusTree::LeafPage::InsertEntry(
     uint32_t pos, const std::string& key, const std::string& value,
-    uint64_t timestamp, bool store_blob) {
+    uint64_t timestamp, bool store_blob, bool is_tombstone) {
     uint32_t val_sz = store_blob ? 8 : static_cast<uint32_t>(value.size());
     uint32_t rec_sz = static_cast<uint32_t>(key.size()) + val_sz;
     uint32_t needed = rec_sz + kSlotSize;
@@ -216,7 +220,8 @@ inline bool BPlusTree::LeafPage::InsertEntry(
     if (pos < count)
         std::memmove(Slot(pos + 1), Slot(pos), (count - pos) * kSlotSize);
     SetSlot(pos, rec_off, static_cast<uint16_t>(key.size()),
-            store_blob ? kLargeValFlag : static_cast<uint16_t>(value.size()), timestamp);
+            store_blob ? kLargeValFlag : static_cast<uint16_t>(value.size()), timestamp,
+            is_tombstone);
     count++;
     data_start = rec_off;
     slot_end += static_cast<uint32_t>(kSlotSize);
@@ -260,7 +265,7 @@ inline void BPlusTree::SplitLeaf(
         } else {
             v.assign(leaf->Rec(i) + leaf->KeyLen(i), leaf->ValLen(i));
         }
-        nl->InsertEntry(nl->count, k, v, leaf->Timestamp(i), blob);
+        nl->InsertEntry(nl->count, k, v, leaf->Timestamp(i), blob, leaf->IsTombstone(i));
     }
     leaf->count = mid;
     leaf->slot_end = LeafPage::kSlotBase + mid * LeafPage::kSlotSize;
@@ -302,7 +307,7 @@ inline void BPlusTree::SplitInternal(
         if (p->keys.size() >= kInternalFanout) { path.pop_back(); indices.pop_back(); SplitInternal(p, path, indices); }
     }
 }
-inline void BPlusTree::Insert(const std::string& key, const std::string& value, uint64_t timestamp) {
+inline void BPlusTree::Insert(const std::string& key, const std::string& value, uint64_t timestamp, bool is_tombstone) {
     std::vector<InternalNode*> path;
     std::vector<uint32_t> indices;
     LeafPage* leaf = FindLeafForWrite(key, path, indices);
@@ -311,21 +316,21 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
 
     if (leaf->Find(key, pos)) {
         size_t es = key.size() + value.size() + Config::kMemTableEntryOverheadBytes;
-        if (!leaf->InsertEntry(pos, key, value, timestamp, large)) {
+        if (!leaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone)) {
             SplitLeaf(leaf, path.back(), indices.back(), path, indices);
             leaf = FindLeafForWrite(key, path, indices);
             leaf->Find(key, pos);
-            leaf->InsertEntry(pos, key, value, timestamp, large);
+            leaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone);
         }
         memory_usage_ += es;
         return;
     }
 
-    if (!leaf->InsertEntry(pos, key, value, timestamp, large)) {
+    if (!leaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone)) {
         SplitLeaf(leaf, path.back(), indices.back(), path, indices);
         leaf = FindLeafForWrite(key, path, indices);
         leaf->Find(key, pos);
-        leaf->InsertEntry(pos, key, value, timestamp, large);
+        leaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone);
     }
     count_++;
     memory_usage_ += key.size() + value.size() + Config::kMemTableEntryOverheadBytes;
@@ -338,6 +343,7 @@ inline bool BPlusTree::Lookup(const std::string& key, uint64_t read_ts, std::str
     for (uint32_t i = idx; i < leaf->count; ++i) {
         if (std::string(leaf->Rec(i), leaf->KeyLen(i)) != key) break;
         if (leaf->Timestamp(i) <= read_ts) {
+            if (leaf->IsTombstone(i)) return false;
             if (leaf->ValLen(i) == kLargeValFlag) {
                 void* blob; std::memcpy(&blob, leaf->Rec(i) + leaf->KeyLen(i), sizeof(void*));
                 size_t sz; std::memcpy(&sz, blob, 8);
@@ -366,7 +372,7 @@ inline void BPlusTree::Export(std::vector<KeyValuePair>& out) const {
             kv.key = std::move(k);
             kv.value = std::move(v);
             kv.timestamp = leaf->Timestamp(i);
-            kv.is_tombstone = kv.value.empty();
+            kv.is_tombstone = leaf->IsTombstone(i);
             out.push_back(std::move(kv));
         }
 }
@@ -402,7 +408,7 @@ inline void BPlusTree::MemTableWalk::Load() {
         current_.value.assign(leaf_->Rec(pos_) + leaf_->KeyLen(pos_), vl);
     }
     current_.timestamp = leaf_->Timestamp(pos_);
-    current_.is_tombstone = current_.value.empty();
+    current_.is_tombstone = leaf_->IsTombstone(pos_);
 }
 
 } // namespace kvdb

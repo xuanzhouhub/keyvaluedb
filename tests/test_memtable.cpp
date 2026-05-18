@@ -258,6 +258,31 @@ void TestExportAfterManySplits() {
         ASSERT_TRUE(entries[i - 1].key < entries[i].key);
 }
 
+void TestTombstoneDistinctFromEmptyValue() {
+    kvdb::MemTable memtable(0, 1024 * 1024);
+    std::string v;
+    memtable.Insert("k", "real", 10, false);
+    ASSERT_TRUE(memtable.Lookup("k", 10, v));
+    ASSERT_STREQ("real", v);
+    memtable.Insert("k", "", 20, false);
+    ASSERT_TRUE(memtable.Lookup("k", 20, v));
+    ASSERT_STREQ("", v);
+    memtable.Insert("k", "", 30, true);
+    ASSERT_FALSE(memtable.Lookup("k", 30, v));
+    ASSERT_TRUE(memtable.Lookup("k", 25, v));
+    ASSERT_STREQ("", v);
+}
+
+void TestTombstoneViaMemTableInsert() {
+    kvdb::MemTable memtable(0, 1024 * 1024);
+    memtable.Insert("live", "ok");
+    memtable.Insert("dead", "", 10, true);
+    std::string v;
+    ASSERT_TRUE(memtable.Lookup("live", 10, v));
+    ASSERT_STREQ("ok", v);
+    ASSERT_FALSE(memtable.Lookup("dead", 10, v));
+}
+
 void RunTests() {
     std::cout << "Running MemTable Tests...\n\n";
     TestBasicInsert();
@@ -283,6 +308,8 @@ void RunTests() {
     TestExportAfterHeavyMVCC();
     TestExportAfterSplittingMVCC();
     TestExportAfterManySplits();
+    TestTombstoneDistinctFromEmptyValue();
+    TestTombstoneViaMemTableInsert();
 }
 
 }

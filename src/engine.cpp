@@ -350,7 +350,51 @@ void LSMTreeEngine::Insert(const std::string& key, const std::string& value) {
 }
 
 void LSMTreeEngine::Delete(const std::string& key) {
-    Insert(key, "");
+    if (key.size() > Config::kMaxKeyBytes) {
+        throw std::invalid_argument(
+            "Key size (" + std::to_string(key.size())
+            + " bytes) exceeds maximum allowed ("
+            + std::to_string(Config::kMaxKeyBytes) + " bytes)");
+    }
+
+    uint64_t ts = global_ts_.fetch_add(1) + 1;
+
+    wal_->Buffer(key, "", ts);
+    size_t my_seq = wal_->CurrentBatchSeq();
+
+    {
+        std::unique_lock<std::mutex> lock(sync_->mtx);
+        sync_->requested_seq = my_seq;
+        sync_->ready_cv.notify_one();
+    }
+
+    {
+        std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
+        active_memtable_->Insert(key, "", ts, true);
+
+        if (active_memtable_->IsFull()) {
+            auto frozen = active_memtable_;
+            frozen->Freeze();
+            frozen_memtables_.push_back(frozen);
+            {
+                std::lock_guard<std::mutex> lk(flush_->mtx);
+                flush_->pending++;
+            }
+            flush_->cv.notify_one();
+            active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_);
+        }
+    }
+
+    {
+        std::unique_lock<std::mutex> lock(sync_->mtx);
+        sync_->cv.wait(lock, [this, my_seq] {
+            return sync_->synced_seq >= my_seq;
+        });
+    }
+
+    kv_cache_->Erase(key);
+
+    DrainRecyclePending();
 }
 
 bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const {
@@ -439,12 +483,10 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
         }
     }
 
-    if (!hit) return false;
+    if (!hit) { value_out.clear(); return false; }
 
-    if (found_val.empty()) {
-        kv_cache_->Erase(key);
+    if (found_val.empty())
         return false;
-    }
 
     value_out = found_val;
     kv_cache_->Put(key, found_val, read_ts);

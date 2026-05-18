@@ -22,8 +22,9 @@ struct SerializedEntry {
     uint32_t key_len; const char* key_data;
     uint32_t value_len; const char* value_data;
     uint64_t timestamp;
+    bool is_tombstone = false;
     std::string key_owned; std::string val_owned;  // kept alive until freeze
-    size_t WireSize() const { return 4 + key_len + 4 + value_len + 8; }
+    size_t WireSize() const { return 4 + key_len + 4 + value_len + 8 + 1; }
 };
 
 void CompressBlock(std::vector<char>& buf) {
@@ -63,7 +64,7 @@ public:
             const char* v = e.val_owned.empty() ? e.value_data : e.val_owned.data();
             p32(e.key_len); buf.insert(buf.end(), k, k + e.key_len);
             p32(e.value_len); buf.insert(buf.end(), v, v + e.value_len);
-            p64(e.timestamp); bloom.Add(std::string(k, e.key_len));
+            p64(e.timestamp); buf.push_back(e.is_tombstone ? 1 : 0); bloom.Add(std::string(k, e.key_len));
         }
         if (uncompressed_out) uncompressed_out->assign(buf.begin(), buf.end());
         std::vector<char> comp; comp.swap(buf); CompressBlock(comp);
@@ -93,7 +94,7 @@ void WriteBlock(std::ostream& file, BlockBuilder& builder,
     for (auto& e : builder.Entries()) {
         p32(e.key_len); buf.insert(buf.end(), e.key_data, e.key_data+e.key_len);
         p32(e.value_len); buf.insert(buf.end(), e.value_data, e.value_data+e.value_len);
-        p64(e.timestamp); bloom.Add(std::string(e.key_data, e.key_len));
+        p64(e.timestamp); buf.push_back(e.is_tombstone ? 1 : 0); bloom.Add(std::string(e.key_data, e.key_len));
     }
     std::vector<char> comp; comp.swap(buf); CompressBlock(comp);
     CRC32 crc; crc.Update(comp.data(), comp.size());
@@ -127,7 +128,7 @@ void SSTable::Write(const std::string& filepath, const std::vector<KeyValuePair>
     BlockBuilder builder(Config::kSSTableBlockSize);
     for(auto& kv:entries){
         SerializedEntry se; se.key_len=static_cast<uint32_t>(kv.key.size());se.key_data=kv.key.data();
-        se.value_len=static_cast<uint32_t>(kv.value.size());se.value_data=kv.value.data();se.timestamp=kv.timestamp;
+        se.value_len=static_cast<uint32_t>(kv.value.size());se.value_data=kv.value.data();se.timestamp=kv.timestamp;se.is_tombstone=kv.is_tombstone;
         bool allow=(builder.Count()==0); if(allow)first_keys.push_back(kv.key);
         while(!builder.TryAppend(se,allow)){WriteBlock(file,builder,offsets,bloom);builder.Reset();allow=true;first_keys.push_back(kv.key);}
     }
@@ -150,7 +151,7 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
     struct BlockData { std::vector<char> data; std::string first_key; std::string uncompressed; };
     std::vector<BlockData> blocks;
     std::string min_key, max_key, prev_key, best_val, block_first_key;
-    uint64_t best_ts = 0; bool has_best = false; size_t written = 0;
+    uint64_t best_ts = 0; bool has_best = false; bool best_tomb = false; size_t written = 0;
 
     auto flushBest = [&]() {
         if (!has_best) return;
@@ -160,6 +161,7 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
         se.value_len = static_cast<uint32_t>(best_val.size());
         se.val_owned = best_val; se.value_data = se.val_owned.data();
         se.timestamp = best_ts;
+        se.is_tombstone = best_tomb;
         if (builder.Count() == 0) block_first_key = prev_key;
         while (!builder.TryAppend(se, builder.Count() == 0)) {
             BlockData bd; bd.first_key = block_first_key;
@@ -175,10 +177,10 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
         const std::string& k = walk.Key();
         if (k != prev_key) {
             flushBest();
-            prev_key = k; best_ts = walk.Timestamp(); best_val = walk.Value(); has_best = true;
+            prev_key = k; best_ts = walk.Timestamp(); best_val = walk.Value(); best_tomb = walk.IsTombstone(); has_best = true;
         } else {
             uint64_t ts = walk.Timestamp();
-            if (ts > best_ts) { best_ts = ts; best_val = walk.Value(); }
+            if (ts > best_ts) { best_ts = ts; best_val = walk.Value(); best_tomb = walk.IsTombstone(); }
         }
         walk.Next();
     }
@@ -251,7 +253,7 @@ SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
         std::istringstream bs(std::string(cbuf.begin(),cbuf.end()));
         auto r32=[&](){uint32_t v=0;v|=uint8_t(bs.get());v|=uint8_t(bs.get())<<8;v|=uint8_t(bs.get())<<16;v|=uint8_t(bs.get())<<24;return v;};
         uint32_t n=r32();
-        for(uint32_t i=0;i<n;++i){uint32_t kl=r32();bs.seekg(kl,std::ios::cur);uint32_t vl=r32();bs.seekg(vl,std::ios::cur);for(int b=0;b<8;++b)bs.get();if(kl<meta.min_key_len)meta.min_key_len=kl;if(kl>meta.max_key_len)meta.max_key_len=kl;}
+        for(uint32_t i=0;i<n;++i){uint32_t kl=r32();bs.seekg(kl,std::ios::cur);uint32_t vl=r32();bs.seekg(vl,std::ios::cur);for(int b=0;b<8;++b)bs.get();bs.get();if(kl<meta.min_key_len)meta.min_key_len=kl;if(kl>meta.max_key_len)meta.max_key_len=kl;}
         seen+=n;
     }
     if(minkl>0){meta.min_key.resize(minkl);file.read(&meta.min_key[0],minkl);}
@@ -283,7 +285,7 @@ std::vector<KeyValuePair> SSTable::ReadAll(const std::string& filepath) {
         std::istringstream bs(std::string(cbuf.begin(),cbuf.end()));
         auto r32=[&](){uint32_t v=0;v|=uint8_t(bs.get());v|=uint8_t(bs.get())<<8;v|=uint8_t(bs.get())<<16;v|=uint8_t(bs.get())<<24;return v;};
         uint32_t n=r32();
-        for(uint32_t i=0;i<n;++i){uint32_t kl=r32();std::string k(kl,0);bs.read(&k[0],kl);uint32_t vl=r32();std::string v(vl,0);bs.read(&v[0],vl);uint64_t ts=0;for(int b=0;b<8;++b)ts|=static_cast<uint64_t>(static_cast<uint8_t>(bs.get()))<<(b*8);entries.push_back({std::move(k),std::move(v),ts,v.empty()});}
+        for(uint32_t i=0;i<n;++i){uint32_t kl=r32();std::string k(kl,0);bs.read(&k[0],kl);uint32_t vl=r32();std::string v(vl,0);bs.read(&v[0],vl);uint64_t ts=0;for(int b=0;b<8;++b)ts|=static_cast<uint64_t>(static_cast<uint8_t>(bs.get()))<<(b*8);uint8_t fl=uint8_t(bs.get());entries.push_back({std::move(k),std::move(v),ts,(fl&1)!=0});}
     }
     return entries;
 }
@@ -304,7 +306,7 @@ bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
                 std::istringstream bs(std::move(block_data));
                 auto r32=[&](){uint32_t v=0;v|=uint8_t(bs.get());v|=uint8_t(bs.get())<<8;v|=uint8_t(bs.get())<<16;v|=uint8_t(bs.get())<<24;return v;};
                 uint32_t n=r32();
-                for(uint32_t i=0;i<n;++i){uint32_t kl=r32();std::string k(kl,0);bs.read(&k[0],kl);uint32_t vl=r32();std::string v(vl,0);bs.read(&v[0],vl);uint64_t ts=0;for(int b=0;b<8;++b)ts|=static_cast<uint64_t>(static_cast<uint8_t>(bs.get()))<<(b*8);if(k==key&&ts<=read_ts){value_out=std::move(v);return true;}}
+                for(uint32_t i=0;i<n;++i){uint32_t kl=r32();std::string k(kl,0);bs.read(&k[0],kl);uint32_t vl=r32();std::string v(vl,0);bs.read(&v[0],vl);uint64_t ts=0;for(int b=0;b<8;++b)ts|=static_cast<uint64_t>(static_cast<uint8_t>(bs.get()))<<(b*8);uint8_t fl=uint8_t(bs.get());if(k==key&&ts<=read_ts){value_out=std::move(v);return true;}}
                 return false;
             }
         }
@@ -316,7 +318,7 @@ bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
         std::istringstream bs(std::string(cbuf.begin(),cbuf.end()));
         auto r32=[&](){uint32_t v=0;v|=uint8_t(bs.get());v|=uint8_t(bs.get())<<8;v|=uint8_t(bs.get())<<16;v|=uint8_t(bs.get())<<24;return v;};
         uint32_t n=r32();
-        for(uint32_t i=0;i<n;++i){uint32_t kl=r32();std::string k(kl,0);bs.read(&k[0],kl);uint32_t vl=r32();std::string v(vl,0);bs.read(&v[0],vl);uint64_t ts=0;for(int b=0;b<8;++b)ts|=static_cast<uint64_t>(static_cast<uint8_t>(bs.get()))<<(b*8);if(k==key&&ts<=read_ts){value_out=std::move(v);return true;}}
+        for(uint32_t i=0;i<n;++i){uint32_t kl=r32();std::string k(kl,0);bs.read(&k[0],kl);uint32_t vl=r32();std::string v(vl,0);bs.read(&v[0],vl);uint64_t ts=0;for(int b=0;b<8;++b)ts|=static_cast<uint64_t>(static_cast<uint8_t>(bs.get()))<<(b*8);uint8_t fl=uint8_t(bs.get());if(k==key&&ts<=read_ts){value_out=std::move(v);return true;}}
         return false;
     };
     if(search(target))return true;

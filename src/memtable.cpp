@@ -7,9 +7,9 @@ MemTable::MemTable(uint64_t id, size_t max_bytes)
     , max_bytes_(max_bytes)
     , frozen_(false) {}
 
-void MemTable::Insert(const std::string& key, const std::string& value, uint64_t timestamp) {
+void MemTable::Insert(const std::string& key, const std::string& value, uint64_t timestamp, bool is_tombstone) {
     if (frozen_) return;
-    tree_.Insert(key, value, timestamp);
+    tree_.Insert(key, value, timestamp, is_tombstone);
 }
 
 bool MemTable::Lookup(const std::string& key, uint64_t read_ts,

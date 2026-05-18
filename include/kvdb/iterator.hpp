@@ -121,7 +121,7 @@ private:
         current.value.assign(block_data.data() + block_pos, vl); block_pos += vl;
         current.timestamp = 0;
         for (int b=0;b<8;++b) current.timestamp |= uint64_t(uint8_t(block_data[block_pos++]))<<(b*8);
-        current.is_tombstone = current.value.empty();
+        current.is_tombstone = (uint8_t(block_data[block_pos++]) & 1) != 0;
     }
 
     static void DecompressBlock(uint8_t comp, std::string& data) {
