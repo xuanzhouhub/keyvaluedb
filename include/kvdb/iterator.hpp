@@ -1,5 +1,6 @@
 #pragma once
 
+#include "block_reader.hpp"
 #include "bptree.hpp"
 #include "config.hpp"
 #include "memtable.hpp"
@@ -67,7 +68,28 @@ struct SSTableIterator : SourceIterator {
     size_t pos = 0;
     KeyValuePair current;
 
-    SSTableIterator(const std::string& filepath) {
+    BlockReader* reader_ = nullptr;
+    uint64_t manifest_seq_ = 0;
+    uint32_t cur_block_ = 0;
+    bool populate_ = true;
+    std::string filepath_;
+
+    SSTableIterator(const std::string& filepath)
+        : reader_(nullptr), manifest_seq_(0) {
+        file.open(filepath, std::ios::binary);
+        if (!file.is_open()) { total_entries = 0; return; }
+        read_u32(); read_u32(); read_u32();
+        total_entries = read_u32();
+        file.seekg(4, std::ios::cur); file.seekg(4, std::ios::cur);
+        ReadNextBlock();
+    }
+
+    SSTableIterator(const std::string& filepath,
+                    BlockReader& reader,
+                    uint64_t manifest_seq,
+                    bool populate = true)
+        : filepath_(filepath), reader_(&reader), manifest_seq_(manifest_seq),
+          populate_(populate) {
         file.open(filepath, std::ios::binary);
         if (!file.is_open()) { total_entries = 0; return; }
         read_u32(); read_u32(); read_u32();
@@ -91,9 +113,50 @@ struct SSTableIterator : SourceIterator {
 private:
     uint32_t read_u32() { uint32_t v=0; v|=uint8_t(file.get()); v|=uint8_t(file.get())<<8; v|=uint8_t(file.get())<<16; v|=uint8_t(file.get())<<24; return v; }
 
+    static uint32_t read_u32_internal_ptr(const char* data, size_t size) {
+        if (4 > size) return 0;
+        return uint8_t(data[0]) | (uint8_t(data[1])<<8)
+             | (uint8_t(data[2])<<16) | (uint8_t(data[3])<<24);
+    }
+
+    void ParseCurrentPtr(const char* data, size_t size) {
+        if (pos >= block_entries) { current = {}; return; }
+        size_t off = 4;
+        for (uint32_t i = 0; i < pos; ++i) {
+            if (off + 4 > size) return;
+            uint32_t kl = read_u32_internal_ptr(data + off, size - off); off += 4;
+            off += kl;
+            if (off + 4 > size) return;
+            uint32_t vl = read_u32_internal_ptr(data + off, size - off); off += 4;
+            off += vl + 8 + 1;
+        }
+        if (off + 4 > size) return;
+        uint32_t kl = read_u32_internal_ptr(data + off, size - off); off += 4;
+        current.key.assign(data + off, kl); off += kl;
+        if (off + 4 > size) return;
+        uint32_t vl = read_u32_internal_ptr(data + off, size - off); off += 4;
+        current.value.assign(data + off, vl); off += vl;
+        current.timestamp = 0;
+        for (int b = 0; b < 8; ++b) current.timestamp |= uint64_t(uint8_t(data[off++]))<<(b*8);
+        current.is_tombstone = (uint8_t(data[off]) & 1) != 0;
+    }
+
     void ReadNextBlock() {
         pos = 0;
         if (read_entries >= total_entries) { block_entries = 0; return; }
+        if (reader_ && manifest_seq_ != 0) {
+            std::string cached;
+            uint32_t ec;
+            if (reader_->GetBlock(manifest_seq_, cur_block_, cached, ec)) {
+                block_data = std::move(cached);
+                block_pos = 0;
+                block_entries = ec > 0 ? ec : read_u32_internal_ptr(block_data.data(), block_data.size());
+                read_entries += block_entries;
+                ++cur_block_;
+                ParseCurrentPtr(block_data.data(), block_data.size());
+                return;
+            }
+        }
         read_u32();
         uint8_t comp = uint8_t(file.get());
         uint32_t csz = read_u32();
@@ -102,7 +165,10 @@ private:
         block_pos = 0;
         block_entries = read_u32_internal();
         read_entries += block_entries;
+        ++cur_block_;
         ParseCurrent();
+        if (populate_ && reader_ && manifest_seq_ != 0)
+            reader_->PutBlock(manifest_seq_, cur_block_ - 1, block_data, block_entries);
     }
 
     uint32_t read_u32_internal() {

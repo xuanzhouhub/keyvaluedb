@@ -145,7 +145,8 @@ void SSTable::Write(const std::string& filepath, const std::vector<KeyValuePair>
 }
 
 void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk& walk,
-                            size_t entry_count, BlockReader* cache) {
+                            size_t entry_count, BlockReader* cache,
+                            uint64_t manifest_seq) {
     BloomFilter bloom(entry_count > 0 ? entry_count : 1, 0.01);
     BlockBuilder builder(Config::kSSTableBlockSize);
     struct BlockData { std::vector<char> data; std::string first_key; std::string uncompressed; };
@@ -206,7 +207,7 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
         file.write(bd.data.data(), static_cast<std::streamsize>(bd.data.size()));
         fkeys.push_back(std::move(bd.first_key));
         if (cache && !bd.uncompressed.empty())
-            cache->PutBlock(filepath, static_cast<uint32_t>(bi),
+            cache->PutBlock(manifest_seq, static_cast<uint32_t>(bi),
                             bd.uncompressed, 0);
     }
 
@@ -229,7 +230,8 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
 }
 
 SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
-                                        BlockReader* cache) {
+                                        BlockReader* cache,
+                                        uint64_t manifest_seq) {
     std::ifstream file(filepath,std::ios::binary);
     if(!file.is_open())throw std::runtime_error("SSTable open: "+filepath);
     Metadata meta; meta.filepath=filepath;
@@ -260,7 +262,10 @@ SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
     meta.block_first_keys.resize(bc);
     for(uint32_t i=0;i<bc;++i){uint16_t kl=static_cast<uint16_t>(ReadUint16LE(file));meta.block_first_keys[i].resize(kl);if(kl>0)file.read(&meta.block_first_keys[i][0],kl);}
     file.seekg(0,std::ios::end);meta.file_size=static_cast<uint64_t>(file.tellg());
-    if (cache) cache->PutMetadata(filepath, meta);
+    if (cache && manifest_seq != 0) {
+        cache->PutBloom(manifest_seq, meta.bloom);
+        cache->PutBlockOffsets(manifest_seq, meta.block_offsets, meta.block_first_keys);
+    }
     return meta;
 }
 
@@ -297,7 +302,7 @@ bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
         if (cache) {
             std::string block_data;
             uint32_t entry_count;
-            if (cache->GetBlock(filepath, idx, block_data, entry_count)) {
+            if (cache->GetBlock(0, idx, block_data, entry_count)) {
                 std::istringstream bs(std::move(block_data));
                 auto r32=[&](){uint32_t v=0;v|=uint8_t(bs.get());v|=uint8_t(bs.get())<<8;v|=uint8_t(bs.get())<<16;v|=uint8_t(bs.get())<<24;return v;};
                 uint32_t n=r32();

@@ -12,17 +12,22 @@ class BlockReader {
 public:
     virtual ~BlockReader() = default;
 
-    virtual bool GetMetadata(const std::string& filepath,
-                             SSTable::Metadata& meta_out) = 0;
-    virtual void PutMetadata(const std::string& filepath,
-                             const SSTable::Metadata& meta) = 0;
+    virtual bool GetBloom(uint64_t seq, BloomFilter& bloom_out) = 0;
+    virtual void PutBloom(uint64_t seq, const BloomFilter& bloom) = 0;
 
-    virtual bool GetBlock(const std::string& filepath, uint32_t block_idx,
+    virtual bool GetBlockOffsets(uint64_t seq,
+                                 std::vector<uint64_t>& offsets_out,
+                                 std::vector<std::string>& first_keys_out) = 0;
+    virtual void PutBlockOffsets(uint64_t seq,
+                                 const std::vector<uint64_t>& offsets,
+                                 const std::vector<std::string>& first_keys) = 0;
+
+    virtual bool GetBlock(uint64_t seq, uint32_t block_idx,
                           std::string& data_out, uint32_t& entry_count_out) = 0;
-    virtual void PutBlock(const std::string& filepath, uint32_t block_idx,
+    virtual void PutBlock(uint64_t seq, uint32_t block_idx,
                           const std::string& data, uint32_t entry_count) = 0;
 
-    virtual void Invalidate(const std::string& filepath) = 0;
+    virtual void Invalidate(uint64_t seq) = 0;
 };
 
 } // namespace kvdb

@@ -131,6 +131,7 @@ C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.
 C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/xnode_handle.h
 C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/internal/crc32.hpp
 C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/iterator.hpp
+C:/Users/lenovo/Documents/AI Coding/keyvaluedb/include/kvdb/snappy.hpp
 C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/fstream
 C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/__msvc_filebuf.hpp
 C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/include/streambuf

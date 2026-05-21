@@ -182,7 +182,8 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
         for (auto& meta : sstable_metadata_) {
             if (meta.min_key.empty() || meta.max_key.empty()) {
                 try {
-                    auto full = SSTable::ReadMetadata(meta.filepath, sst_cache_.get());
+                    auto full = SSTable::ReadMetadata(meta.filepath, sst_cache_.get(),
+                                                       meta.manifest_seq);
                     meta.min_key = std::move(full.min_key);
                     meta.max_key = std::move(full.max_key);
                     meta.bloom = std::move(full.bloom);
@@ -646,11 +647,11 @@ void LSMTreeEngine::DoFlush(std::shared_ptr<MemTable> frozen_memtable) {
 
     size_t entry_count = frozen_memtable->EntryCount();
     auto walk = BPlusTree::MemTableWalk(frozen_memtable->GetTree());
-    SSTable::WriteFromWalk(filepath, walk, entry_count, sst_cache_.get());
+    SSTable::WriteFromWalk(filepath, walk, entry_count, sst_cache_.get(), seq);
 
     SSTable::Metadata meta;
     try {
-        meta = SSTable::ReadMetadata(filepath, sst_cache_.get());
+        meta = SSTable::ReadMetadata(filepath, sst_cache_.get(), seq);
     } catch (const std::exception& e) {
         std::cerr << "ReadMetadata failed: " << e.what() << std::endl;
         auto entries = SSTable::ReadAll(filepath);
@@ -661,6 +662,7 @@ void LSMTreeEngine::DoFlush(std::shared_ptr<MemTable> frozen_memtable) {
     }
     meta.source_table_id = frozen_memtable->Id();
     meta.filepath = filepath;
+    meta.manifest_seq = seq;
 
     {
         std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
@@ -748,7 +750,8 @@ void LSMTreeEngine::CompactLevel(int from_level, int top_level) {
     manifest_->Sync();
 
     for (auto& f : garbage) {
-        sst_cache_->Invalidate(f);
+        for (auto& in : inputs)
+            if (in.filepath == f) { sst_cache_->Invalidate(in.manifest_seq); break; }
         std::error_code ec;
         std::filesystem::remove(f, ec);
     }

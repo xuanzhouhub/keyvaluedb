@@ -15,10 +15,12 @@ class SSTable {
 public:
     static void Write(const std::string& filepath, const std::vector<KeyValuePair>& entries);
     static void WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk& walk,
-                              size_t entry_count, BlockReader* cache = nullptr);
+                              size_t entry_count, BlockReader* cache = nullptr,
+                              uint64_t manifest_seq = 0);
 
     struct Metadata {
         std::string filepath;
+        uint64_t manifest_seq = 0;
         size_t entry_count = 0;
         uint32_t min_key_len = 0;
         uint32_t max_key_len = 0;
@@ -37,7 +39,8 @@ public:
                           BlockReader* cache = nullptr);
 
     static Metadata ReadMetadata(const std::string& filepath,
-                                 BlockReader* cache = nullptr);
+                                 BlockReader* cache = nullptr,
+                                 uint64_t manifest_seq = 0);
 
     static std::vector<KeyValuePair> ReadAll(const std::string& filepath);
 
