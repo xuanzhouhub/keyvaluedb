@@ -9,20 +9,16 @@
 
 namespace kvdb {
 
-class BlockReader;
+class SSTableCache;
 
 class SSTable {
 public:
     static void Write(const std::string& filepath, const std::vector<KeyValuePair>& entries);
     static void WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk& walk,
-                              size_t entry_count);  // default reader
-    static void WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk& walk,
-                              size_t entry_count, BlockReader& cache,
-                              uint64_t manifest_seq);
+                              size_t entry_count, SSTableCache* cache = nullptr);
 
     struct Metadata {
         std::string filepath;
-        uint64_t manifest_seq = 0;
         size_t entry_count = 0;
         uint32_t min_key_len = 0;
         uint32_t max_key_len = 0;
@@ -37,16 +33,11 @@ public:
     };
 
     static bool LookupKey(const std::string& filepath, const std::string& key,
-                          uint64_t read_ts, std::string& value_out);  // default reader
-    static bool LookupKey(const std::string& filepath, const std::string& key,
                           uint64_t read_ts, std::string& value_out,
-                          BlockReader& cache,
-                          uint64_t manifest_seq);
+                          SSTableCache* cache = nullptr);
 
-    static Metadata ReadMetadata(const std::string& filepath);  // default reader
     static Metadata ReadMetadata(const std::string& filepath,
-                                 BlockReader& cache,
-                                 uint64_t manifest_seq);
+                                 SSTableCache* cache = nullptr);
 
     static std::vector<KeyValuePair> ReadAll(const std::string& filepath);
 
@@ -59,8 +50,7 @@ public:
                         const std::string& range_lower,
                         const std::string& range_upper,
                         std::vector<Metadata>& outputs,
-                        std::vector<uint64_t>& garbage_seqs,
-                        BlockReader& cache);
+                        std::vector<std::string>& garbage_files);
 
     static void WriteUint32LE(std::ostream& os, uint32_t value);
     static void WriteUint32LE(std::vector<char>& buf, uint32_t value);

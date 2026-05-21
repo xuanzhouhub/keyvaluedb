@@ -202,18 +202,6 @@ The flush worker holds no locks during disk I/O (`DoFlush`). It only takes B bri
 
 **Locking during compaction**: The worker holds D (`sstable_metadata_mutex_`) only during the snapshot and the final swap. The merge (disk I/O) runs lock-free. During the merge, the flush worker can still add L0 SSTables — they'll be picked up in the next compaction cycle. Readers use their own snapshot of metadata, unaffected by the swap.
 
-### SSTable Caching
-
-Two-layer LRU cache keyed by `uint64_t manifest_seq`:
-
-**Heavy metadata** — bloom filter + block offsets + block first keys per SSTable. Used by `Lookup` to skip unnecessary `LookupKey` calls. Populated by `ReadMetadata` on first access.
-
-**Block data** — uncompressed block payloads. Used by `LookupKey` to avoid disk I/O + decompression on repeated reads. Populated by `WriteFromWalk` during flush.
-
-Resident `sstable_metadata_` holds only light fields (~118B/SSTable): filepath, seq, entry_count, min/max key range, level. No bloom or block index in memory — those are cache-only.
-
-Invalidation on compaction GC: `Invalidate(seq)` removes all cache entries for the SSTable. Block entries range-scanned via `BlockKey(seq, 0)` to `BlockKey(seq+1, 0)`.
-
 ### WAL Sync Path (WAL sync worker)
 
 ```

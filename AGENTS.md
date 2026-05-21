@@ -67,8 +67,7 @@
 
 ### Caching
 - **KV Cache** (`kv_cache.hpp`): LRU key-value cache for point lookups. Write-through (populated after WAL sync). Tombstones erase cache entries. Blobs (> 2KB) are not cached. Default: 10K entries / 16MB.
-- **SSTable Cache** (`block_cache.hpp`): Two-layer LRU cache keyed by `uint64_t manifest_seq`. Heavy metadata (bloom filter + block offsets + block first keys) per SSTable. Uncompressed block data per block. Serves both reads (cache hit avoids disk I/O) and writes (blocks populated during flush). Old entries invalidated on compaction GC via seq range scan. Default: 1024 blocks / 256 metadata / 64MB.
-- **Resident metadata** (`sstable_metadata_`): only light fields (~118 bytes/SSTable) — filepath, seq, entry_count, min/max key, level. Bloom and block index live exclusively in the cache.
+- **SSTable Cache** (`block_cache.hpp`): LRU cache for SSTable metadata (headers, bloom, block index) and uncompressed data blocks. Serves both reads (read-through) and writes (blocks populated during flush). Old SSTable entries invalidated on compaction GC. Default: 1024 blocks / 256 metadata / 64MB.
 
 ### Server/Client
 - TCP server: connection-per-client threads, single writer queue, concurrent reads via MVCC.

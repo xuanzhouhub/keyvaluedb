@@ -218,7 +218,6 @@ std::vector<SSTable::Metadata> Manifest::Recover() {
 
             SSTable::Metadata meta;
             meta.filepath = std::string(path_buf.begin(), path_buf.end());
-            meta.manifest_seq = seq;
             meta.entry_count = static_cast<size_t>(entry_count);
             meta.min_key_len = min_key_len;
             meta.max_key_len = max_key_len;

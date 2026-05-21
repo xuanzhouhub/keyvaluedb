@@ -180,10 +180,12 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
         for (auto& meta : sstable_metadata_) {
             if (meta.min_key.empty() || meta.max_key.empty()) {
                 try {
-                    auto full = SSTable::ReadMetadata(meta.filepath, *sst_cache_,
-                                                       meta.manifest_seq);
+                    auto full = SSTable::ReadMetadata(meta.filepath, sst_cache_.get());
                     meta.min_key = std::move(full.min_key);
                     meta.max_key = std::move(full.max_key);
+                    meta.bloom = std::move(full.bloom);
+                    meta.block_offsets = std::move(full.block_offsets);
+                    meta.block_first_keys = std::move(full.block_first_keys);
                 } catch (...) {}
             }
         }
@@ -450,15 +452,9 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
             if (scanned_ids.count(it->source_table_id)) continue;
             if (!it->min_key.empty() && key < it->min_key) continue;
             if (!it->max_key.empty() && key > it->max_key) continue;
-            {
-                BloomFilter bf;
-                if (sst_cache_->GetBloom(it->manifest_seq, bf) &&
-                    bf.BitCount() > 0 && !bf.MightContain(key))
-                    continue;
-            }
+            if (it->bloom.BitCount() > 0 && !it->bloom.MightContain(key)) continue;
             try {
-                hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val, *sst_cache_,
-                                         it->manifest_seq);
+                hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val, sst_cache_.get());
             } catch (const std::exception&) {}
         }
 
@@ -478,15 +474,9 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
                 if (it == files.end()) continue;
                 if (key < it->min_key || key > it->max_key) continue;
                 if (scanned_ids.count(it->source_table_id)) continue;
-                {
-                    BloomFilter bf;
-                    if (sst_cache_->GetBloom(it->manifest_seq, bf) &&
-                        bf.BitCount() > 0 && !bf.MightContain(key))
-                        continue;
-                }
+                if (it->bloom.BitCount() > 0 && !it->bloom.MightContain(key)) continue;
                 try {
-                    hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val, *sst_cache_,
-                                         it->manifest_seq);
+                    hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val, sst_cache_.get());
                 } catch (const std::exception&) {}
                 if (hit) break;
             }
@@ -598,26 +588,25 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
 
     {
         std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
-        std::map<int, std::vector<LevelFile>> groups;
+        std::map<int, std::vector<SSTable::Metadata>> groups;
         for (const auto& meta : sstable_metadata_) {
             if (!upper.IsUnbounded() && !meta.min_key.empty() && meta.min_key > upper.key) continue;
             if (!lower.IsUnbounded() && !meta.max_key.empty() && meta.max_key < lower.key) continue;
             if (meta.level == 0) {
                 try {
-                    auto iter = std::make_unique<SSTableIterator>(meta.filepath,
-                        *sst_cache_, meta.manifest_seq);
+                    auto iter = std::make_unique<SSTableIterator>(meta.filepath);
                     if (iter->Valid()) {
                         if (!lower.IsUnbounded()) iter->SeekToKey(lower.key);
                         if (iter->Valid()) sources.push_back(std::move(iter));
                     }
                 } catch (...) {}
             } else {
-                groups[meta.level].push_back({meta.filepath, meta.manifest_seq});
+                groups[meta.level].push_back(meta);
             }
         }
         for (auto& [lvl, files] : groups) {
             try {
-                auto li = std::make_unique<LevelIterator>(files, *sst_cache_);
+                auto li = std::make_unique<LevelIterator>(files);
                 if (li->Valid()) {
                     if (!lower.IsUnbounded()) li->SeekToKey(lower.key);
                     if (li->Valid()) sources.push_back(std::move(li));
@@ -655,11 +644,11 @@ void LSMTreeEngine::DoFlush(std::shared_ptr<MemTable> frozen_memtable) {
 
     size_t entry_count = frozen_memtable->EntryCount();
     auto walk = BPlusTree::MemTableWalk(frozen_memtable->GetTree());
-    SSTable::WriteFromWalk(filepath, walk, entry_count, *sst_cache_, seq);
+    SSTable::WriteFromWalk(filepath, walk, entry_count, sst_cache_.get());
 
     SSTable::Metadata meta;
     try {
-        meta = SSTable::ReadMetadata(filepath, *sst_cache_, seq);
+        meta = SSTable::ReadMetadata(filepath, sst_cache_.get());
     } catch (const std::exception& e) {
         std::cerr << "ReadMetadata failed: " << e.what() << std::endl;
         auto entries = SSTable::ReadAll(filepath);
@@ -670,10 +659,6 @@ void LSMTreeEngine::DoFlush(std::shared_ptr<MemTable> frozen_memtable) {
     }
     meta.source_table_id = frozen_memtable->Id();
     meta.filepath = filepath;
-    meta.manifest_seq = seq;
-    meta.bloom = BloomFilter();
-    meta.block_offsets.clear();
-    meta.block_first_keys.clear();
 
     {
         std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
@@ -739,9 +724,9 @@ void LSMTreeEngine::CompactLevel(int from_level, int top_level) {
 
     uint64_t seq = sstable_seq_.fetch_add(64);
     std::vector<SSTable::Metadata> outputs;
-    std::vector<uint64_t> garbage;
+    std::vector<std::string> garbage;
     SSTable::Compact(inputs, data_dir_, seq, to_level,
-                     max_sst, is_last, "", "", outputs, garbage, *sst_cache_);
+                     max_sst, is_last, "", "", outputs, garbage);
 
     {
         std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
@@ -751,12 +736,7 @@ void LSMTreeEngine::CompactLevel(int from_level, int top_level) {
                 [&](const SSTable::Metadata& m) { return m.filepath == in.filepath; }),
                 all.end());
         }
-        for (auto& out : outputs) {
-            out.bloom = BloomFilter();
-            out.block_offsets.clear();
-            out.block_first_keys.clear();
-            all.push_back(out);
-        }
+        for (auto& out : outputs) all.push_back(out);
     }
 
     for (auto& in : inputs)
@@ -765,15 +745,10 @@ void LSMTreeEngine::CompactLevel(int from_level, int top_level) {
         manifest_->AddSSTable(sstable_seq_.fetch_add(1), out);
     manifest_->Sync();
 
-    for (auto& g : garbage) {
-        sst_cache_->Invalidate(g);
-        for (auto& in : inputs) {
-            if (in.manifest_seq == g) {
-                std::error_code ec;
-                std::filesystem::remove(in.filepath, ec);
-                break;
-            }
-        }
+    for (auto& f : garbage) {
+        sst_cache_->Invalidate(f);
+        std::error_code ec;
+        std::filesystem::remove(f, ec);
     }
 }
 

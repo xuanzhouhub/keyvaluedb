@@ -111,8 +111,6 @@ uint32_t ReadUint16LE(std::istream& is) {
 
 } // anonymous namespace
 
-NullBlockReader g_default_reader;
-
 void SSTable::Write(const std::string& filepath, const std::vector<KeyValuePair>& entries) {
     std::ofstream file(filepath, std::ios::binary|std::ios::trunc);
     if(!file.is_open()) throw std::runtime_error("SSTable open failed: "+filepath);
@@ -147,8 +145,7 @@ void SSTable::Write(const std::string& filepath, const std::vector<KeyValuePair>
 }
 
 void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk& walk,
-                            size_t entry_count, BlockReader& cache,
-                            uint64_t manifest_seq) {
+                            size_t entry_count, SSTableCache* cache) {
     BloomFilter bloom(entry_count > 0 ? entry_count : 1, 0.01);
     BlockBuilder builder(Config::kSSTableBlockSize);
     struct BlockData { std::vector<char> data; std::string first_key; std::string uncompressed; };
@@ -208,8 +205,8 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
         offsets.push_back(static_cast<uint64_t>(file.tellp()));
         file.write(bd.data.data(), static_cast<std::streamsize>(bd.data.size()));
         fkeys.push_back(std::move(bd.first_key));
-        if (!bd.uncompressed.empty())
-            cache.PutBlock(manifest_seq, static_cast<uint32_t>(bi),
+        if (cache && !bd.uncompressed.empty())
+            cache->PutBlock(filepath, static_cast<uint32_t>(bi),
                             bd.uncompressed, 0);
     }
 
@@ -231,14 +228,13 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
     WriteUint64LE(file, filter_off); WriteUint32LE(file, Config::kSSTableFooterMagic);
 }
 
-void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk& walk,
-                            size_t entry_count) {
-    WriteFromWalk(filepath, walk, entry_count, g_default_reader, 0);
-}
-
 SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
-                                        BlockReader& cache,
-                                        uint64_t manifest_seq) {
+                                        SSTableCache* cache) {
+    if (cache) {
+        Metadata cached;
+        if (cache->GetMetadata(filepath, cached))
+            return cached;
+    }
     std::ifstream file(filepath,std::ios::binary);
     if(!file.is_open())throw std::runtime_error("SSTable open: "+filepath);
     Metadata meta; meta.filepath=filepath;
@@ -269,15 +265,8 @@ SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
     meta.block_first_keys.resize(bc);
     for(uint32_t i=0;i<bc;++i){uint16_t kl=static_cast<uint16_t>(ReadUint16LE(file));meta.block_first_keys[i].resize(kl);if(kl>0)file.read(&meta.block_first_keys[i][0],kl);}
     file.seekg(0,std::ios::end);meta.file_size=static_cast<uint64_t>(file.tellg());
-    if (manifest_seq != 0) {
-        cache.PutBloom(manifest_seq, meta.bloom);
-        cache.PutBlockOffsets(manifest_seq, meta.block_offsets, meta.block_first_keys);
-    }
+    if (cache) cache->PutMetadata(filepath, meta);
     return meta;
-}
-
-SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath) {
-    return ReadMetadata(filepath, g_default_reader, 0);
 }
 
 std::vector<KeyValuePair> SSTable::ReadAll(const std::string& filepath) {
@@ -303,17 +292,18 @@ std::vector<KeyValuePair> SSTable::ReadAll(const std::string& filepath) {
 
 bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
                          uint64_t read_ts, std::string& value_out,
-                         BlockReader& cache, uint64_t manifest_seq) {
-    auto meta=ReadMetadata(filepath, cache, manifest_seq);
+                         SSTableCache* cache) {
+    auto meta=ReadMetadata(filepath, cache);
     if(meta.block_first_keys.empty())return false;
     uint32_t target=0;
     for(uint32_t i=0;i<meta.block_first_keys.size();++i){if(key<meta.block_first_keys[i])break;target=i;}
     auto search=[&](uint32_t idx)->bool{
         if(idx>=meta.block_offsets.size())return false;
-        if (manifest_seq != 0) {
-            auto sp = cache.GetBlock(manifest_seq, idx);
-            if (sp) {
-                std::istringstream bs(*sp);
+        if (cache) {
+            std::string block_data;
+            uint32_t entry_count;
+            if (cache->GetBlock(filepath, idx, block_data, entry_count)) {
+                std::istringstream bs(std::move(block_data));
                 auto r32=[&](){uint32_t v=0;v|=uint8_t(bs.get());v|=uint8_t(bs.get())<<8;v|=uint8_t(bs.get())<<16;v|=uint8_t(bs.get())<<24;return v;};
                 uint32_t n=r32();
                 for(uint32_t i=0;i<n;++i){uint32_t kl=r32();std::string k(kl,0);bs.read(&k[0],kl);uint32_t vl=r32();std::string v(vl,0);bs.read(&v[0],vl);uint64_t ts=0;for(int b=0;b<8;++b)ts|=static_cast<uint64_t>(static_cast<uint8_t>(bs.get()))<<(b*8);uint8_t fl=uint8_t(bs.get());if(k==key&&ts<=read_ts){value_out=std::move(v);return true;}}
@@ -335,11 +325,6 @@ bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
     if(target>0&&search(target-1))return true;
     if(target+1<meta.block_offsets.size()&&search(target+1))return true;
     return false;
-}
-
-bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
-                         uint64_t read_ts, std::string& value_out) {
-    return LookupKey(filepath, key, read_ts, value_out, g_default_reader, 0);
 }
 
 void SSTable::WriteUint32LE(std::ostream& os, uint32_t value) {
@@ -377,8 +362,7 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
                       const std::string& range_lower,
                       const std::string& range_upper,
                       std::vector<Metadata>& outputs,
-                      std::vector<uint64_t>& garbage_seqs,
-                      BlockReader& cache) {
+                      std::vector<std::string>& garbage_files) {
     struct MergeSrc {
         std::unique_ptr<SourceIterator> iter;
         KeyValuePair cur;
@@ -393,18 +377,17 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
 
     for (auto& in : inputs) {
         if (in.level == 0) {
-            auto it = std::make_unique<SSTableIterator>(in.filepath, cache,
-                                                          in.manifest_seq);
+            auto it = std::make_unique<SSTableIterator>(in.filepath);
             if (it->Valid()) sources.emplace_back(std::move(it));
         }
     }
 
-    std::map<int, std::vector<LevelFile>> level_groups;
+    std::map<int, std::vector<SSTable::Metadata>> level_groups;
     for (auto& in : inputs) {
-        if (in.level > 0) level_groups[in.level].push_back({in.filepath, in.manifest_seq});
+        if (in.level > 0) level_groups[in.level].push_back(in);
     }
     for (auto& [lvl, files] : level_groups) {
-        auto li = std::make_unique<LevelIterator>(files, cache);
+        auto li = std::make_unique<LevelIterator>(files);
         if (li->Valid()) sources.emplace_back(std::move(li));
     }
 
@@ -452,7 +435,7 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
             oss << output_dir << "/sstable_" << seq++ << ".sst";
             std::string fpath = oss.str();
             SSTable::Write(fpath, batch);
-            Metadata meta = ReadMetadata(fpath, cache, 0);
+            Metadata meta = ReadMetadata(fpath);
             meta.filepath = fpath;
             meta.level = output_level;
             outputs.push_back(std::move(meta));
@@ -468,13 +451,13 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
         oss << output_dir << "/sstable_" << seq << ".sst";
         std::string fpath = oss.str();
         SSTable::Write(fpath, batch);
-        Metadata meta = ReadMetadata(fpath, cache, 0);
+        Metadata meta = ReadMetadata(fpath);
         meta.filepath = fpath;
         meta.level = output_level;
         outputs.push_back(std::move(meta));
     }
 
-    for (auto& in : inputs) garbage_seqs.push_back(in.manifest_seq);
+    for (auto& in : inputs) garbage_files.push_back(in.filepath);
 }
 
 } // namespace kvdb
