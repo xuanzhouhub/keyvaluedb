@@ -314,11 +314,10 @@ bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
     for(uint32_t i=0;i<meta.block_first_keys.size();++i){if(key<meta.block_first_keys[i])break;target=i;}
     auto search=[&](uint32_t idx)->bool{
         if(idx>=meta.block_offsets.size())return false;
-        if (cache) {
-            std::string block_data;
-            uint32_t entry_count;
-            if (cache->GetBlock(manifest_seq, idx, block_data, entry_count)) {
-                std::istringstream bs(std::move(block_data));
+        if (cache && manifest_seq != 0) {
+            auto sp = cache->GetBlock(manifest_seq, idx);
+            if (sp) {
+                std::istringstream bs(*sp);
                 auto r32=[&](){uint32_t v=0;v|=uint8_t(bs.get());v|=uint8_t(bs.get())<<8;v|=uint8_t(bs.get())<<16;v|=uint8_t(bs.get())<<24;return v;};
                 uint32_t n=r32();
                 for(uint32_t i=0;i<n;++i){uint32_t kl=r32();std::string k(kl,0);bs.read(&k[0],kl);uint32_t vl=r32();std::string v(vl,0);bs.read(&v[0],vl);uint64_t ts=0;for(int b=0;b<8;++b)ts|=static_cast<uint64_t>(static_cast<uint8_t>(bs.get()))<<(b*8);uint8_t fl=uint8_t(bs.get());if(k==key&&ts<=read_ts){value_out=std::move(v);return true;}}

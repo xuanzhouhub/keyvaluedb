@@ -1,6 +1,6 @@
 #pragma once
 
-#include "block_cache.hpp"
+#include "block_reader.hpp"
 #include "bptree.hpp"
 #include "config.hpp"
 #include "memtable.hpp"
@@ -69,24 +69,14 @@ struct SSTableIterator : SourceIterator {
     KeyValuePair current;
 
     SSTableIterator(const std::string& filepath,
-                    SSTableCache* cache = nullptr,
-                    uint64_t manifest_seq = 0,
-                    uint32_t start_block = 0)
-        : cache_(cache), manifest_seq_(manifest_seq) {
+                    BlockReader* reader = nullptr,
+                    uint64_t manifest_seq = 0)
+        : reader_(reader), manifest_seq_(manifest_seq) {
         file.open(filepath, std::ios::binary);
         if (!file.is_open()) { total_entries = 0; return; }
         read_u32(); read_u32(); read_u32();
         total_entries = read_u32();
         file.seekg(4, std::ios::cur); file.seekg(4, std::ios::cur);
-        if (start_block > 0) {
-            read_entries = 0;
-            for (uint32_t i = 0; i < start_block; ++i) {
-                read_u32(); file.seekg(1, std::ios::cur);
-                uint32_t csz = read_u32();
-                file.seekg(static_cast<std::streamoff>(csz), std::ios::cur);
-                read_entries += 1;
-            }
-        }
         ReadNextBlock();
     }
 
@@ -107,17 +97,15 @@ private:
 
     void ReadNextBlock() {
         pos = 0;
-        if (read_entries >= total_entries) { block_entries = 0; return; }
-        if (cache_ && manifest_seq_ != 0) {
-            std::string cached;
-            uint32_t ec;
-            if (cache_->GetBlock(manifest_seq_, cur_block_, cached, ec)) {
-                block_data = std::move(cached);
+        if (read_entries >= total_entries) { block_entries = 0; cached_block_.reset(); return; }
+        if (reader_ && manifest_seq_ != 0) {
+            cached_block_ = reader_->GetBlock(manifest_seq_, cur_block_);
+            if (cached_block_) {
                 block_pos = 0;
-                block_entries = ec > 0 ? ec : read_u32_internal();
+                block_entries = read_u32_internal_ptr(cached_block_->data(), cached_block_->size());
                 read_entries += block_entries;
                 ++cur_block_;
-                ParseCurrent();
+                ParseCurrentPtr(cached_block_->data(), cached_block_->size());
                 return;
             }
         }
@@ -130,9 +118,9 @@ private:
         block_entries = read_u32_internal();
         read_entries += block_entries;
         ++cur_block_;
-        if (cache_ && manifest_seq_ != 0)
-            cache_->PutBlock(manifest_seq_, cur_block_ - 1, block_data, block_entries);
         ParseCurrent();
+        if (reader_ && manifest_seq_ != 0)
+            reader_->PutBlock(manifest_seq_, cur_block_ - 1, block_data, block_entries);
     }
 
     uint32_t read_u32_internal() {
@@ -154,6 +142,34 @@ private:
         current.is_tombstone = (uint8_t(block_data[block_pos++]) & 1) != 0;
     }
 
+    static uint32_t read_u32_internal_ptr(const char* data, size_t size) {
+        if (4 > size) return 0;
+        return uint8_t(data[0]) | (uint8_t(data[1])<<8)
+             | (uint8_t(data[2])<<16) | (uint8_t(data[3])<<24);
+    }
+
+    void ParseCurrentPtr(const char* data, size_t size) {
+        if (pos >= block_entries) { current = {}; return; }
+        size_t off = 4;
+        for (uint32_t i = 0; i < pos; ++i) {
+            if (off + 4 > size) return;
+            uint32_t kl = read_u32_internal_ptr(data + off, size - off); off += 4;
+            off += kl;
+            if (off + 4 > size) return;
+            uint32_t vl = read_u32_internal_ptr(data + off, size - off); off += 4;
+            off += vl + 8 + 1;
+        }
+        if (off + 4 > size) return;
+        uint32_t kl = read_u32_internal_ptr(data + off, size - off); off += 4;
+        current.key.assign(data + off, kl); off += kl;
+        if (off + 4 > size) return;
+        uint32_t vl = read_u32_internal_ptr(data + off, size - off); off += 4;
+        current.value.assign(data + off, vl); off += vl;
+        current.timestamp = 0;
+        for (int b = 0; b < 8; ++b) current.timestamp |= uint64_t(uint8_t(data[off++]))<<(b*8);
+        current.is_tombstone = (uint8_t(data[off]) & 1) != 0;
+    }
+
     static void DecompressBlock(uint8_t comp, std::string& data) {
         if (comp == Config::kCompressionSnappy) {
             std::string d; Snappy::Uncompress(data.data(), data.size(), d);
@@ -162,16 +178,17 @@ private:
     }
 
     static constexpr int kCompression = Config::kCompressionSnappy ? 1 : 0;
-    SSTableCache* cache_ = nullptr;
+    BlockReader* reader_ = nullptr;
     uint64_t manifest_seq_ = 0;
     uint32_t cur_block_ = 0;
+    std::shared_ptr<const std::string> cached_block_;
 };
 
 class LevelIterator : public SourceIterator {
 public:
     LevelIterator(const std::vector<SSTable::Metadata>& files,
-                  SSTableCache* cache = nullptr)
-        : files_(files), cache_(cache) {
+                  BlockReader* reader = nullptr)
+        : files_(files), reader_(reader) {
         std::sort(files_.begin(), files_.end(),
                   [](const SSTable::Metadata& a, const SSTable::Metadata& b)
                   { return a.min_key < b.min_key; });
@@ -200,7 +217,7 @@ private:
     void OpenNext() {
         while (idx_ < files_.size()) {
             current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath,
-                                                          cache_, files_[idx_].manifest_seq);
+                                                          reader_, files_[idx_].manifest_seq);
             ++idx_;
             if (current_->Valid()) return;
         }
@@ -209,7 +226,7 @@ private:
 
     std::vector<SSTable::Metadata> files_;
     size_t idx_ = 0;
-    SSTableCache* cache_ = nullptr;
+    BlockReader* reader_ = nullptr;
     std::unique_ptr<SSTableIterator> current_;
 };
 
