@@ -292,7 +292,7 @@ std::vector<KeyValuePair> SSTable::ReadAll(const std::string& filepath) {
 
 bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
                          uint64_t read_ts, std::string& value_out,
-                         BlockReader* cache) {
+                         BlockReader* cache, uint64_t manifest_seq) {
     auto meta=ReadMetadata(filepath, cache);
     if(meta.block_first_keys.empty())return false;
     uint32_t target=0;
@@ -302,11 +302,11 @@ bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
         if (cache) {
             std::string block_data;
             uint32_t entry_count;
-            if (cache->GetBlock(0, idx, block_data, entry_count)) {
+            if (cache->GetBlock(manifest_seq, idx, block_data, entry_count)) {
                 std::istringstream bs(std::move(block_data));
                 auto r32=[&](){uint32_t v=0;v|=uint8_t(bs.get());v|=uint8_t(bs.get())<<8;v|=uint8_t(bs.get())<<16;v|=uint8_t(bs.get())<<24;return v;};
                 uint32_t n=r32();
-                for(uint32_t i=0;i<n;++i){uint32_t kl=r32();std::string k(kl,0);bs.read(&k[0],kl);uint32_t vl=r32();std::string v(vl,0);bs.read(&v[0],vl);uint64_t ts=0;for(int b=0;b<8;++b)ts|=static_cast<uint64_t>(static_cast<uint8_t>(bs.get()))<<(b*8);uint8_t fl=uint8_t(bs.get());if(k==key&&ts<=read_ts){value_out=std::move(v);return true;}}
+                for(uint32_t i=0;i<n;++i){uint32_t kl=r32();std::string k(kl,0);bs.read(&k[0],kl);uint32_t vl=r32();std::string v(vl,0);bs.read(&v[0],vl);uint64_t ts=0;for(int b=0;b<8;++b)ts|=static_cast<uint64_t>(static_cast<uint8_t>(bs.get()))<<(b*8);uint8_t fl=uint8_t(bs.get());if(k==key&&ts<=read_ts){if(fl&1){value_out.clear();return true;}value_out=std::move(v);return true;}}
                 return false;
             }
         }
@@ -318,7 +318,7 @@ bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
         std::istringstream bs(std::string(cbuf.begin(),cbuf.end()));
         auto r32=[&](){uint32_t v=0;v|=uint8_t(bs.get());v|=uint8_t(bs.get())<<8;v|=uint8_t(bs.get())<<16;v|=uint8_t(bs.get())<<24;return v;};
         uint32_t n=r32();
-        for(uint32_t i=0;i<n;++i){uint32_t kl=r32();std::string k(kl,0);bs.read(&k[0],kl);uint32_t vl=r32();std::string v(vl,0);bs.read(&v[0],vl);uint64_t ts=0;for(int b=0;b<8;++b)ts|=static_cast<uint64_t>(static_cast<uint8_t>(bs.get()))<<(b*8);uint8_t fl=uint8_t(bs.get());if(k==key&&ts<=read_ts){value_out=std::move(v);return true;}}
+        for(uint32_t i=0;i<n;++i){uint32_t kl=r32();std::string k(kl,0);bs.read(&k[0],kl);uint32_t vl=r32();std::string v(vl,0);bs.read(&v[0],vl);uint64_t ts=0;for(int b=0;b<8;++b)ts|=static_cast<uint64_t>(static_cast<uint8_t>(bs.get()))<<(b*8);uint8_t fl=uint8_t(bs.get());if(k==key&&ts<=read_ts){if(fl&1)return false;value_out=std::move(v);return true;}}
         return false;
     };
     if(search(target))return true;

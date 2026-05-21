@@ -1024,8 +1024,8 @@ events:
     checks:
       - "Detecting CXX compiler ABI info"
     directories:
-      source: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/CMakeFiles/CMakeScratch/TryCompile-5sb5ho"
-      binary: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/CMakeFiles/CMakeScratch/TryCompile-5sb5ho"
+      source: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/CMakeFiles/CMakeScratch/TryCompile-yi0rwm"
+      binary: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/CMakeFiles/CMakeScratch/TryCompile-yi0rwm"
     cmakeVariables:
       CMAKE_CXX_FLAGS: "/DWIN32 /D_WINDOWS /GR /EHsc"
       CMAKE_CXX_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
@@ -1036,28 +1036,28 @@ events:
       variable: "CMAKE_CXX_ABI_COMPILED"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/CMakeFiles/CMakeScratch/TryCompile-5sb5ho'
+        Change Dir: 'C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/CMakeFiles/CMakeScratch/TryCompile-yi0rwm'
         
-        Run Build Command(s): "C:/Program Files/CMake/bin/cmake.exe" -E env VERBOSE=1 nmake -f Makefile /nologo cmTC_88a7d\\fast
-        	"C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\nmake.exe"  -f CMakeFiles\\cmTC_88a7d.dir\\build.make /nologo -L                  CMakeFiles\\cmTC_88a7d.dir\\build
-        Building CXX object CMakeFiles/cmTC_88a7d.dir/CMakeCXXCompilerABI.cpp.obj
-        	"C:\\Program Files\\CMake\\bin\\cmake.exe" -E cmake_cl_compile_depends --dep-file=CMakeFiles\\cmTC_88a7d.dir\\CMakeCXXCompilerABI.cpp.obj.d --working-dir="C:\\Users\\lenovo\\Documents\\AI Coding\\keyvaluedb\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5sb5ho" --filter-prefix="注意: 包含文件:  " -- C:\\PROGRA~2\\MICROS~4\\2022\\BUILDT~1\\VC\\Tools\\MSVC\\1444~1.352\\bin\\Hostx64\\x64\\cl.exe @C:\\Users\\lenovo\\AppData\\Local\\Temp\\nm6935.tmp
+        Run Build Command(s): "C:/Program Files/CMake/bin/cmake.exe" -E env VERBOSE=1 nmake -f Makefile /nologo cmTC_8a1d7\\fast
+        	"C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\nmake.exe"  -f CMakeFiles\\cmTC_8a1d7.dir\\build.make /nologo -L                  CMakeFiles\\cmTC_8a1d7.dir\\build
+        Building CXX object CMakeFiles/cmTC_8a1d7.dir/CMakeCXXCompilerABI.cpp.obj
+        	"C:\\Program Files\\CMake\\bin\\cmake.exe" -E cmake_cl_compile_depends --dep-file=CMakeFiles\\cmTC_8a1d7.dir\\CMakeCXXCompilerABI.cpp.obj.d --working-dir="C:\\Users\\lenovo\\Documents\\AI Coding\\keyvaluedb\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yi0rwm" --filter-prefix="注意: 包含文件:  " -- C:\\PROGRA~2\\MICROS~4\\2022\\BUILDT~1\\VC\\Tools\\MSVC\\1444~1.352\\bin\\Hostx64\\x64\\cl.exe @C:\\Users\\lenovo\\AppData\\Local\\Temp\\nm6212.tmp
         CMakeCXXCompilerABI.cpp
-        Linking CXX executable cmTC_88a7d.exe
-        	"C:\\Program Files\\CMake\\bin\\cmake.exe" -E vs_link_exe --msvc-ver=1944 --intdir=CMakeFiles\\cmTC_88a7d.dir --rc=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100261~1.0\\x64\\rc.exe --mt=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100261~1.0\\x64\\mt.exe --manifests -- C:\\PROGRA~2\\MICROS~4\\2022\\BUILDT~1\\VC\\Tools\\MSVC\\1444~1.352\\bin\\Hostx64\\x64\\link.exe /nologo @CMakeFiles\\cmTC_88a7d.dir\\objects1.rsp @C:\\Users\\lenovo\\AppData\\Local\\Temp\\nm6965.tmp
+        Linking CXX executable cmTC_8a1d7.exe
+        	"C:\\Program Files\\CMake\\bin\\cmake.exe" -E vs_link_exe --msvc-ver=1944 --intdir=CMakeFiles\\cmTC_8a1d7.dir --rc=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100261~1.0\\x64\\rc.exe --mt=C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100261~1.0\\x64\\mt.exe --manifests -- C:\\PROGRA~2\\MICROS~4\\2022\\BUILDT~1\\VC\\Tools\\MSVC\\1444~1.352\\bin\\Hostx64\\x64\\link.exe /nologo @CMakeFiles\\cmTC_8a1d7.dir\\objects1.rsp @C:\\Users\\lenovo\\AppData\\Local\\Temp\\nm6251.tmp
         Visual Studio Incremental Link with embedded manifests
-        Create CMakeFiles\\cmTC_88a7d.dir/manifest.rc
-        Create empty: CMakeFiles\\cmTC_88a7d.dir/embed.manifest
+        Create CMakeFiles\\cmTC_8a1d7.dir/manifest.rc
+        Create empty: CMakeFiles\\cmTC_8a1d7.dir/embed.manifest
         RC Pass 1:
-        C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100261~1.0\\x64\\rc.exe /fo CMakeFiles\\cmTC_88a7d.dir/manifest.res CMakeFiles\\cmTC_88a7d.dir/manifest.rc
+        C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100261~1.0\\x64\\rc.exe /fo CMakeFiles\\cmTC_8a1d7.dir/manifest.res CMakeFiles\\cmTC_8a1d7.dir/manifest.rc
         LINK Pass 1:
-        C:\\PROGRA~2\\MICROS~4\\2022\\BUILDT~1\\VC\\Tools\\MSVC\\1444~1.352\\bin\\Hostx64\\x64\\link.exe /nologo @CMakeFiles\\cmTC_88a7d.dir\\objects1.rsp /out:cmTC_88a7d.exe /implib:cmTC_88a7d.lib /pdb:C:\\Users\\lenovo\\Documents\\AI Coding\\keyvaluedb\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5sb5ho\\cmTC_88a7d.pdb /version:0.0 /machine:x64 /debug /INCREMENTAL /subsystem:console kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTFILE:CMakeFiles\\cmTC_88a7d.dir/intermediate.manifest CMakeFiles\\cmTC_88a7d.dir/manifest.res
+        C:\\PROGRA~2\\MICROS~4\\2022\\BUILDT~1\\VC\\Tools\\MSVC\\1444~1.352\\bin\\Hostx64\\x64\\link.exe /nologo @CMakeFiles\\cmTC_8a1d7.dir\\objects1.rsp /out:cmTC_8a1d7.exe /implib:cmTC_8a1d7.lib /pdb:C:\\Users\\lenovo\\Documents\\AI Coding\\keyvaluedb\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yi0rwm\\cmTC_8a1d7.pdb /version:0.0 /machine:x64 /debug /INCREMENTAL /subsystem:console kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTFILE:CMakeFiles\\cmTC_8a1d7.dir/intermediate.manifest CMakeFiles\\cmTC_8a1d7.dir/manifest.res
         MT:
-        C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100261~1.0\\x64\\mt.exe /nologo /manifest CMakeFiles\\cmTC_88a7d.dir/intermediate.manifest /out:CMakeFiles\\cmTC_88a7d.dir/embed.manifest /notify_update
+        C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100261~1.0\\x64\\mt.exe /nologo /manifest CMakeFiles\\cmTC_8a1d7.dir/intermediate.manifest /out:CMakeFiles\\cmTC_8a1d7.dir/embed.manifest /notify_update
         RC Pass 2:
-        C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100261~1.0\\x64\\rc.exe /fo CMakeFiles\\cmTC_88a7d.dir/manifest.res CMakeFiles\\cmTC_88a7d.dir/manifest.rc
+        C:\\PROGRA~2\\WI3CF2~1\\10\\bin\\100261~1.0\\x64\\rc.exe /fo CMakeFiles\\cmTC_8a1d7.dir/manifest.res CMakeFiles\\cmTC_8a1d7.dir/manifest.rc
         FINAL LINK:
-        C:\\PROGRA~2\\MICROS~4\\2022\\BUILDT~1\\VC\\Tools\\MSVC\\1444~1.352\\bin\\Hostx64\\x64\\link.exe /nologo @CMakeFiles\\cmTC_88a7d.dir\\objects1.rsp /out:cmTC_88a7d.exe /implib:cmTC_88a7d.lib /pdb:C:\\Users\\lenovo\\Documents\\AI Coding\\keyvaluedb\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5sb5ho\\cmTC_88a7d.pdb /version:0.0 /machine:x64 /debug /INCREMENTAL /subsystem:console kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTFILE:CMakeFiles\\cmTC_88a7d.dir/intermediate.manifest CMakeFiles\\cmTC_88a7d.dir/manifest.res
+        C:\\PROGRA~2\\MICROS~4\\2022\\BUILDT~1\\VC\\Tools\\MSVC\\1444~1.352\\bin\\Hostx64\\x64\\link.exe /nologo @CMakeFiles\\cmTC_8a1d7.dir\\objects1.rsp /out:cmTC_8a1d7.exe /implib:cmTC_8a1d7.lib /pdb:C:\\Users\\lenovo\\Documents\\AI Coding\\keyvaluedb\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yi0rwm\\cmTC_8a1d7.pdb /version:0.0 /machine:x64 /debug /INCREMENTAL /subsystem:console kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTFILE:CMakeFiles\\cmTC_8a1d7.dir/intermediate.manifest CMakeFiles\\cmTC_8a1d7.dir/manifest.res
         
       exitCode: 0
   -

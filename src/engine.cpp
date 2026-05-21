@@ -457,7 +457,8 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
             if (!it->max_key.empty() && key > it->max_key) continue;
             if (it->bloom.BitCount() > 0 && !it->bloom.MightContain(key)) continue;
             try {
-                hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val, sst_cache_.get());
+                hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val, sst_cache_.get(),
+                                         it->manifest_seq);
             } catch (const std::exception&) {}
         }
 
@@ -479,7 +480,8 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
                 if (scanned_ids.count(it->source_table_id)) continue;
                 if (it->bloom.BitCount() > 0 && !it->bloom.MightContain(key)) continue;
                 try {
-                    hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val, sst_cache_.get());
+                    hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val, sst_cache_.get(),
+                                         it->manifest_seq);
                 } catch (const std::exception&) {}
                 if (hit) break;
             }
@@ -488,8 +490,10 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
 
     if (!hit) { value_out.clear(); return false; }
 
-    if (found_val.empty())
+    if (found_val.empty()) {
+        value_out.clear();
         return false;
+    }
 
     value_out = found_val;
     kv_cache_->Put(key, found_val, read_ts);

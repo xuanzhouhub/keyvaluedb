@@ -36,7 +36,8 @@ public:
 
     static bool LookupKey(const std::string& filepath, const std::string& key,
                           uint64_t read_ts, std::string& value_out,
-                          BlockReader* cache = nullptr);
+                          BlockReader* cache = nullptr,
+                          uint64_t manifest_seq = 0);
 
     static Metadata ReadMetadata(const std::string& filepath,
                                  BlockReader* cache = nullptr,
