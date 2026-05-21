@@ -2,8 +2,6 @@
 
 #include "config.hpp"
 #include "iterator.hpp"
-#include "kv_cache.hpp"
-#include "block_cache.hpp"
 #include "manifest.hpp"
 #include "memtable.hpp"
 #include "snp_tracker.hpp"
@@ -22,6 +20,8 @@
 
 namespace kvdb {
 
+class KVCache;
+class SSTableCache;
 struct EngineSyncState;
 struct FlushState;
 struct CompactionState;

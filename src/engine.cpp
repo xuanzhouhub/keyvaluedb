@@ -1,6 +1,8 @@
 #include "kvdb/engine.hpp"
 
+#include "kvdb/block_cache.hpp"
 #include "kvdb/bptree.hpp"
+#include "kvdb/kv_cache.hpp"
 
 #include <algorithm>
 #include <chrono>
