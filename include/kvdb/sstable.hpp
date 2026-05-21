@@ -9,13 +9,13 @@
 
 namespace kvdb {
 
-class SSTableCache;
+class BlockReader;
 
 class SSTable {
 public:
     static void Write(const std::string& filepath, const std::vector<KeyValuePair>& entries);
     static void WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk& walk,
-                              size_t entry_count, SSTableCache* cache = nullptr);
+                              size_t entry_count, BlockReader* cache = nullptr);
 
     struct Metadata {
         std::string filepath;
@@ -34,10 +34,10 @@ public:
 
     static bool LookupKey(const std::string& filepath, const std::string& key,
                           uint64_t read_ts, std::string& value_out,
-                          SSTableCache* cache = nullptr);
+                          BlockReader* cache = nullptr);
 
     static Metadata ReadMetadata(const std::string& filepath,
-                                 SSTableCache* cache = nullptr);
+                                 BlockReader* cache = nullptr);
 
     static std::vector<KeyValuePair> ReadAll(const std::string& filepath);
 
