@@ -1,5 +1,6 @@
 #pragma once
 
+#include "block_reader.hpp"
 #include "sstable.hpp"
 
 #include <cstddef>
@@ -11,22 +12,22 @@
 
 namespace kvdb {
 
-class SSTableCache {
+class SSTableCache : public BlockReader {
 public:
     SSTableCache(size_t max_blocks = 1024, size_t max_meta = 256,
                  size_t max_bytes = 64 * 1024 * 1024);
 
     bool GetMetadata(const std::string& filepath,
-                     SSTable::Metadata& meta_out);
+                     SSTable::Metadata& meta_out) override;
     void PutMetadata(const std::string& filepath,
-                     const SSTable::Metadata& meta);
+                     const SSTable::Metadata& meta) override;
 
     bool GetBlock(const std::string& filepath, uint32_t block_idx,
-                  std::string& data_out, uint32_t& entry_count_out);
+                  std::string& data_out, uint32_t& entry_count_out) override;
     void PutBlock(const std::string& filepath, uint32_t block_idx,
-                  const std::string& data, uint32_t entry_count);
+                  const std::string& data, uint32_t entry_count) override;
 
-    void Invalidate(const std::string& filepath);
+    void Invalidate(const std::string& filepath) override;
 
 private:
     void EvictBlock();
