@@ -145,7 +145,7 @@ void SSTable::Write(const std::string& filepath, const std::vector<KeyValuePair>
 }
 
 void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk& walk,
-                            size_t entry_count, SSTableCache* cache,
+                            size_t entry_count, BlockReader* cache,
                             uint64_t manifest_seq) {
     BloomFilter bloom(entry_count > 0 ? entry_count : 1, 0.01);
     BlockBuilder builder(Config::kSSTableBlockSize);
@@ -230,7 +230,7 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
 }
 
 SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
-                                        SSTableCache* cache,
+                                        BlockReader* cache,
                                         uint64_t manifest_seq) {
     if (cache && manifest_seq != 0) {
         BloomFilter cached_bloom;
@@ -307,7 +307,7 @@ std::vector<KeyValuePair> SSTable::ReadAll(const std::string& filepath) {
 
 bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
                          uint64_t read_ts, std::string& value_out,
-                         SSTableCache* cache, uint64_t manifest_seq) {
+                         BlockReader* cache, uint64_t manifest_seq) {
     auto meta=ReadMetadata(filepath, cache, manifest_seq);
     if(meta.block_first_keys.empty())return false;
     uint32_t target=0;

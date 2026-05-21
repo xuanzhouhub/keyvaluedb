@@ -21,13 +21,13 @@ public:
     SSTableCache(const SSTableCache&) = delete;
     SSTableCache& operator=(const SSTableCache&) = delete;
 
-    bool GetBloom(uint64_t seq, BloomFilter& bloom_out);
-    void PutBloom(uint64_t seq, const BloomFilter& bloom);
+    bool GetBloom(uint64_t seq, BloomFilter& bloom_out) override;
+    void PutBloom(uint64_t seq, const BloomFilter& bloom) override;
 
     bool GetBlockOffsets(uint64_t seq, std::vector<uint64_t>& offsets_out,
-                         std::vector<std::string>& first_keys_out);
+                         std::vector<std::string>& first_keys_out) override;
     void PutBlockOffsets(uint64_t seq, const std::vector<uint64_t>& offsets,
-                         const std::vector<std::string>& first_keys);
+                         const std::vector<std::string>& first_keys) override;
 
     std::shared_ptr<const std::string> GetBlock(
         uint64_t seq, uint32_t block_idx) override;
