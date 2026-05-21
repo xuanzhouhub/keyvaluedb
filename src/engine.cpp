@@ -598,7 +598,7 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
 
     {
         std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
-        std::map<int, std::vector<SSTable::Metadata>> groups;
+        std::map<int, std::vector<LevelFile>> groups;
         for (const auto& meta : sstable_metadata_) {
             if (!upper.IsUnbounded() && !meta.min_key.empty() && meta.min_key > upper.key) continue;
             if (!lower.IsUnbounded() && !meta.max_key.empty() && meta.max_key < lower.key) continue;
@@ -612,7 +612,7 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
                     }
                 } catch (...) {}
             } else {
-                groups[meta.level].push_back(meta);
+                groups[meta.level].push_back({meta.filepath, meta.manifest_seq});
             }
         }
         for (auto& [lvl, files] : groups) {

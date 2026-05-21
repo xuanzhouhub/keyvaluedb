@@ -5,7 +5,6 @@
 #include "config.hpp"
 #include "memtable.hpp"
 #include "snappy.hpp"
-#include "sstable.hpp"
 #include "types.hpp"
 
 #include <cstdint>
@@ -18,6 +17,11 @@
 #include <vector>
 
 namespace kvdb {
+
+struct LevelFile {
+    std::string filepath;
+    uint64_t manifest_seq;
+};
 
 struct SourceIterator {
     virtual bool Valid() const = 0;
@@ -186,12 +190,12 @@ private:
 
 class LevelIterator : public SourceIterator {
 public:
-    LevelIterator(const std::vector<SSTable::Metadata>& files,
+    LevelIterator(const std::vector<LevelFile>& files,
                   BlockReader& reader)
         : files_(files), reader_(&reader) {
         std::sort(files_.begin(), files_.end(),
-                  [](const SSTable::Metadata& a, const SSTable::Metadata& b)
-                  { return a.min_key < b.min_key; });
+                  [](const LevelFile& a, const LevelFile& b)
+                  { return a.filepath < b.filepath; });
         OpenNext();
     }
 
@@ -200,18 +204,6 @@ public:
     void Next() override {
         current_->Next();
         if (!current_->Valid()) OpenNext();
-    }
-
-    void SeekToKey(const std::string& key) override {
-        while (idx_ < files_.size() && !files_[idx_].max_key.empty() && files_[idx_].max_key < key)
-            ++idx_;
-        if (idx_ < files_.size()) {
-            current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath,
-                                                          *reader_, files_[idx_].manifest_seq);
-            ++idx_;
-            if (current_->Valid()) current_->SeekToKey(key);
-            if (!current_->Valid()) OpenNext();
-        }
     }
 
 private:
@@ -225,7 +217,7 @@ private:
         current_.reset();
     }
 
-    std::vector<SSTable::Metadata> files_;
+    std::vector<LevelFile> files_;
     size_t idx_ = 0;
     BlockReader* reader_ = nullptr;
     std::unique_ptr<SSTableIterator> current_;

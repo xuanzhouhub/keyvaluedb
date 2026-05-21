@@ -399,9 +399,9 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
         }
     }
 
-    std::map<int, std::vector<SSTable::Metadata>> level_groups;
+    std::map<int, std::vector<LevelFile>> level_groups;
     for (auto& in : inputs) {
-        if (in.level > 0) level_groups[in.level].push_back(in);
+        if (in.level > 0) level_groups[in.level].push_back({in.filepath, in.manifest_seq});
     }
     for (auto& [lvl, files] : level_groups) {
         auto li = std::make_unique<LevelIterator>(files, cache);
