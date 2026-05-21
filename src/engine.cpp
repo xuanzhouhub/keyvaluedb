@@ -601,7 +601,8 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
             if (!lower.IsUnbounded() && !meta.max_key.empty() && meta.max_key < lower.key) continue;
             if (meta.level == 0) {
                 try {
-                    auto iter = std::make_unique<SSTableIterator>(meta.filepath);
+                    auto iter = std::make_unique<SSTableIterator>(meta.filepath,
+                        *sst_cache_, meta.manifest_seq);
                     if (iter->Valid()) {
                         if (!lower.IsUnbounded()) iter->SeekToKey(lower.key);
                         if (iter->Valid()) sources.push_back(std::move(iter));
@@ -613,7 +614,7 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
         }
         for (auto& [lvl, files] : groups) {
             try {
-                auto li = std::make_unique<LevelIterator>(files);
+                auto li = std::make_unique<LevelIterator>(files, *sst_cache_);
                 if (li->Valid()) {
                     if (!lower.IsUnbounded()) li->SeekToKey(lower.key);
                     if (li->Valid()) sources.push_back(std::move(li));
@@ -734,7 +735,7 @@ void LSMTreeEngine::CompactLevel(int from_level, int top_level) {
     std::vector<SSTable::Metadata> outputs;
     std::vector<std::string> garbage;
     SSTable::Compact(inputs, data_dir_, seq, to_level,
-                     max_sst, is_last, "", "", outputs, garbage);
+                     max_sst, is_last, "", "", outputs, garbage, *sst_cache_);
 
     {
         std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);

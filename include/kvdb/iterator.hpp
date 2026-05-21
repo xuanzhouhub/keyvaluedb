@@ -74,16 +74,6 @@ struct SSTableIterator : SourceIterator {
     bool populate_ = true;
     std::string filepath_;
 
-    SSTableIterator(const std::string& filepath)
-        : reader_(nullptr), manifest_seq_(0) {
-        file.open(filepath, std::ios::binary);
-        if (!file.is_open()) { total_entries = 0; return; }
-        read_u32(); read_u32(); read_u32();
-        total_entries = read_u32();
-        file.seekg(4, std::ios::cur); file.seekg(4, std::ios::cur);
-        ReadNextBlock();
-    }
-
     SSTableIterator(const std::string& filepath,
                     BlockReader& reader,
                     uint64_t manifest_seq,
@@ -202,7 +192,9 @@ private:
 
 class LevelIterator : public SourceIterator {
 public:
-    LevelIterator(const std::vector<SSTable::Metadata>& files) : files_(files) {
+    LevelIterator(const std::vector<SSTable::Metadata>& files,
+                  BlockReader& reader)
+        : files_(files), reader_(&reader) {
         std::sort(files_.begin(), files_.end(),
                   [](const SSTable::Metadata& a, const SSTable::Metadata& b)
                   { return a.min_key < b.min_key; });
@@ -220,7 +212,8 @@ public:
         while (idx_ < files_.size() && !files_[idx_].max_key.empty() && files_[idx_].max_key < key)
             ++idx_;
         if (idx_ < files_.size()) {
-            current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath);
+            current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath,
+                *reader_, files_[idx_].manifest_seq);
             ++idx_;
             if (current_->Valid()) current_->SeekToKey(key);
             if (!current_->Valid()) OpenNext();
@@ -230,7 +223,8 @@ public:
 private:
     void OpenNext() {
         while (idx_ < files_.size()) {
-            current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath);
+            current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath,
+                *reader_, files_[idx_].manifest_seq);
             ++idx_;
             if (current_->Valid()) return;
         }
@@ -239,6 +233,7 @@ private:
 
     std::vector<SSTable::Metadata> files_;
     size_t idx_ = 0;
+    BlockReader* reader_ = nullptr;
     std::unique_ptr<SSTableIterator> current_;
 };
 

@@ -362,7 +362,8 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
                       const std::string& range_lower,
                       const std::string& range_upper,
                       std::vector<Metadata>& outputs,
-                      std::vector<std::string>& garbage_files) {
+                      std::vector<std::string>& garbage_files,
+                      BlockReader& cache) {
     struct MergeSrc {
         std::unique_ptr<SourceIterator> iter;
         KeyValuePair cur;
@@ -377,7 +378,8 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
 
     for (auto& in : inputs) {
         if (in.level == 0) {
-            auto it = std::make_unique<SSTableIterator>(in.filepath);
+            auto it = std::make_unique<SSTableIterator>(in.filepath, cache,
+                                                          in.manifest_seq, false);
             if (it->Valid()) sources.emplace_back(std::move(it));
         }
     }
@@ -387,7 +389,7 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
         if (in.level > 0) level_groups[in.level].push_back(in);
     }
     for (auto& [lvl, files] : level_groups) {
-        auto li = std::make_unique<LevelIterator>(files);
+        auto li = std::make_unique<LevelIterator>(files, cache);
         if (li->Valid()) sources.emplace_back(std::move(li));
     }
 
