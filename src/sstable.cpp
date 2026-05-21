@@ -239,21 +239,6 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
 SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
                                         BlockReader& cache,
                                         uint64_t manifest_seq) {
-    if (manifest_seq != 0) {
-        BloomFilter cached_bloom;
-        std::vector<uint64_t> cached_offsets;
-        std::vector<std::string> cached_keys;
-        if (cache.GetBloom(manifest_seq, cached_bloom) &&
-            cache.GetBlockOffsets(manifest_seq, cached_offsets, cached_keys)) {
-            Metadata m;
-            m.filepath = filepath;
-            m.manifest_seq = manifest_seq;
-            m.bloom = std::move(cached_bloom);
-            m.block_offsets = std::move(cached_offsets);
-            m.block_first_keys = std::move(cached_keys);
-            return m;
-        }
-    }
     std::ifstream file(filepath,std::ios::binary);
     if(!file.is_open())throw std::runtime_error("SSTable open: "+filepath);
     Metadata meta; meta.filepath=filepath;
