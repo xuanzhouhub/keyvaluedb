@@ -1,5 +1,6 @@
 #pragma once
 
+#include "block_cache.hpp"
 #include "bptree.hpp"
 #include "config.hpp"
 #include "memtable.hpp"
@@ -67,12 +68,25 @@ struct SSTableIterator : SourceIterator {
     size_t pos = 0;
     KeyValuePair current;
 
-    SSTableIterator(const std::string& filepath) {
+    SSTableIterator(const std::string& filepath,
+                    SSTableCache* cache = nullptr,
+                    uint64_t manifest_seq = 0,
+                    uint32_t start_block = 0)
+        : cache_(cache), manifest_seq_(manifest_seq) {
         file.open(filepath, std::ios::binary);
         if (!file.is_open()) { total_entries = 0; return; }
         read_u32(); read_u32(); read_u32();
         total_entries = read_u32();
         file.seekg(4, std::ios::cur); file.seekg(4, std::ios::cur);
+        if (start_block > 0) {
+            read_entries = 0;
+            for (uint32_t i = 0; i < start_block; ++i) {
+                read_u32(); file.seekg(1, std::ios::cur);
+                uint32_t csz = read_u32();
+                file.seekg(static_cast<std::streamoff>(csz), std::ios::cur);
+                read_entries += 1;
+            }
+        }
         ReadNextBlock();
     }
 
@@ -94,6 +108,19 @@ private:
     void ReadNextBlock() {
         pos = 0;
         if (read_entries >= total_entries) { block_entries = 0; return; }
+        if (cache_ && manifest_seq_ != 0) {
+            std::string cached;
+            uint32_t ec;
+            if (cache_->GetBlock(manifest_seq_, cur_block_, cached, ec)) {
+                block_data = std::move(cached);
+                block_pos = 0;
+                block_entries = ec > 0 ? ec : read_u32_internal();
+                read_entries += block_entries;
+                ++cur_block_;
+                ParseCurrent();
+                return;
+            }
+        }
         read_u32();
         uint8_t comp = uint8_t(file.get());
         uint32_t csz = read_u32();
@@ -102,6 +129,7 @@ private:
         block_pos = 0;
         block_entries = read_u32_internal();
         read_entries += block_entries;
+        ++cur_block_;
         ParseCurrent();
     }
 
@@ -132,11 +160,16 @@ private:
     }
 
     static constexpr int kCompression = Config::kCompressionSnappy ? 1 : 0;
+    SSTableCache* cache_ = nullptr;
+    uint64_t manifest_seq_ = 0;
+    uint32_t cur_block_ = 0;
 };
 
 class LevelIterator : public SourceIterator {
 public:
-    LevelIterator(const std::vector<SSTable::Metadata>& files) : files_(files) {
+    LevelIterator(const std::vector<SSTable::Metadata>& files,
+                  SSTableCache* cache = nullptr)
+        : files_(files), cache_(cache) {
         std::sort(files_.begin(), files_.end(),
                   [](const SSTable::Metadata& a, const SSTable::Metadata& b)
                   { return a.min_key < b.min_key; });
@@ -164,7 +197,8 @@ public:
 private:
     void OpenNext() {
         while (idx_ < files_.size()) {
-            current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath);
+            current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath,
+                                                          cache_, files_[idx_].manifest_seq);
             ++idx_;
             if (current_->Valid()) return;
         }
@@ -173,6 +207,7 @@ private:
 
     std::vector<SSTable::Metadata> files_;
     size_t idx_ = 0;
+    SSTableCache* cache_ = nullptr;
     std::unique_ptr<SSTableIterator> current_;
 };
 
