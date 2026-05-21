@@ -230,11 +230,6 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
 
 SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
                                         BlockReader* cache) {
-    if (cache) {
-        Metadata cached;
-        if (cache->GetMetadata(filepath, cached))
-            return cached;
-    }
     std::ifstream file(filepath,std::ios::binary);
     if(!file.is_open())throw std::runtime_error("SSTable open: "+filepath);
     Metadata meta; meta.filepath=filepath;
