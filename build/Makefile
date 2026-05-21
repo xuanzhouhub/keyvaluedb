@@ -246,17 +246,17 @@ test_restart\fast:
 .PHONY : test_restart\fast
 
 #=============================================================================
-# Target rules for targets named test_fuzz
+# Target rules for targets named test_min
 
 # Build rule for target.
-test_fuzz: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\Makefile2 /nologo -$(MAKEFLAGS) test_fuzz
-.PHONY : test_fuzz
+test_min: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\Makefile2 /nologo -$(MAKEFLAGS) test_min
+.PHONY : test_min
 
 # fast build rule for target.
-test_fuzz\fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_fuzz.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_fuzz.dir\build
-.PHONY : test_fuzz\fast
+test_min\fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_min.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_min.dir\build
+.PHONY : test_min\fast
 
 src\client.obj: src\client.cpp.obj
 .PHONY : src\client.obj
@@ -474,30 +474,6 @@ tests\test_engine.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_engine.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_engine.dir\tests\test_engine.cpp.s
 .PHONY : tests\test_engine.cpp.s
 
-tests\test_fuzz.obj: tests\test_fuzz.cpp.obj
-.PHONY : tests\test_fuzz.obj
-
-# target to build an object file
-tests\test_fuzz.cpp.obj:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_fuzz.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj
-.PHONY : tests\test_fuzz.cpp.obj
-
-tests\test_fuzz.i: tests\test_fuzz.cpp.i
-.PHONY : tests\test_fuzz.i
-
-# target to preprocess a source file
-tests\test_fuzz.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_fuzz.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.i
-.PHONY : tests\test_fuzz.cpp.i
-
-tests\test_fuzz.s: tests\test_fuzz.cpp.s
-.PHONY : tests\test_fuzz.s
-
-# target to generate assembly for a file
-tests\test_fuzz.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_fuzz.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.s
-.PHONY : tests\test_fuzz.cpp.s
-
 tests\test_manifest.obj: tests\test_manifest.cpp.obj
 .PHONY : tests\test_manifest.obj
 
@@ -545,6 +521,30 @@ tests\test_memtable.s: tests\test_memtable.cpp.s
 tests\test_memtable.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_memtable.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_memtable.dir\tests\test_memtable.cpp.s
 .PHONY : tests\test_memtable.cpp.s
+
+tests\test_min.obj: tests\test_min.cpp.obj
+.PHONY : tests\test_min.obj
+
+# target to build an object file
+tests\test_min.cpp.obj:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_min.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_min.dir\tests\test_min.cpp.obj
+.PHONY : tests\test_min.cpp.obj
+
+tests\test_min.i: tests\test_min.cpp.i
+.PHONY : tests\test_min.i
+
+# target to preprocess a source file
+tests\test_min.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_min.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_min.dir\tests\test_min.cpp.i
+.PHONY : tests\test_min.cpp.i
+
+tests\test_min.s: tests\test_min.cpp.s
+.PHONY : tests\test_min.s
+
+# target to generate assembly for a file
+tests\test_min.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_min.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_min.dir\tests\test_min.cpp.s
+.PHONY : tests\test_min.cpp.s
 
 tests\test_restart.obj: tests\test_restart.cpp.obj
 .PHONY : tests\test_restart.obj
@@ -701,9 +701,9 @@ help:
 	@echo ... test
 	@echo ... kvdb_lib
 	@echo ... test_engine
-	@echo ... test_fuzz
 	@echo ... test_manifest
 	@echo ... test_memtable
+	@echo ... test_min
 	@echo ... test_restart
 	@echo ... test_server
 	@echo ... test_small
@@ -737,15 +737,15 @@ help:
 	@echo ... tests/test_engine.obj
 	@echo ... tests/test_engine.i
 	@echo ... tests/test_engine.s
-	@echo ... tests/test_fuzz.obj
-	@echo ... tests/test_fuzz.i
-	@echo ... tests/test_fuzz.s
 	@echo ... tests/test_manifest.obj
 	@echo ... tests/test_manifest.i
 	@echo ... tests/test_manifest.s
 	@echo ... tests/test_memtable.obj
 	@echo ... tests/test_memtable.i
 	@echo ... tests/test_memtable.s
+	@echo ... tests/test_min.obj
+	@echo ... tests/test_min.i
+	@echo ... tests/test_min.s
 	@echo ... tests/test_restart.obj
 	@echo ... tests/test_restart.i
 	@echo ... tests/test_restart.s

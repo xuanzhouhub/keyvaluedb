@@ -62,7 +62,7 @@ all: CMakeFiles\test_server.dir\all
 all: CMakeFiles\test_wfw.dir\all
 all: CMakeFiles\test_small.dir\all
 all: CMakeFiles\test_restart.dir\all
-all: CMakeFiles\test_fuzz.dir\all
+all: CMakeFiles\test_min.dir\all
 .PHONY : all
 
 # The main recursive "codegen" target.
@@ -76,7 +76,7 @@ codegen: CMakeFiles\test_server.dir\codegen
 codegen: CMakeFiles\test_wfw.dir\codegen
 codegen: CMakeFiles\test_small.dir\codegen
 codegen: CMakeFiles\test_restart.dir\codegen
-codegen: CMakeFiles\test_fuzz.dir\codegen
+codegen: CMakeFiles\test_min.dir\codegen
 .PHONY : codegen
 
 # The main recursive "preinstall" target.
@@ -94,7 +94,7 @@ clean: CMakeFiles\test_server.dir\clean
 clean: CMakeFiles\test_wfw.dir\clean
 clean: CMakeFiles\test_small.dir\clean
 clean: CMakeFiles\test_restart.dir\clean
-clean: CMakeFiles\test_fuzz.dir\clean
+clean: CMakeFiles\test_min.dir\clean
 .PHONY : clean
 
 #=============================================================================
@@ -136,7 +136,7 @@ CMakeFiles\kvdb_lib.dir\clean:
 CMakeFiles\test_memtable.dir\all: CMakeFiles\kvdb_lib.dir\all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_memtable.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_memtable.dir\depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_memtable.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_memtable.dir\build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=16,17 "Built target test_memtable"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=14,15 "Built target test_memtable"
 .PHONY : CMakeFiles\test_memtable.dir\all
 
 # Build rule for subdir invocation for target.
@@ -153,7 +153,7 @@ test_memtable: CMakeFiles\test_memtable.dir\rule
 # codegen rule for target.
 CMakeFiles\test_memtable.dir\codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_memtable.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_memtable.dir\codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=16,17 "Finished codegen for target test_memtable"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=14,15 "Finished codegen for target test_memtable"
 .PHONY : CMakeFiles\test_memtable.dir\codegen
 
 # clean rule for target.
@@ -264,7 +264,7 @@ CMakeFiles\test_wal.dir\clean:
 CMakeFiles\test_manifest.dir\all: CMakeFiles\kvdb_lib.dir\all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_manifest.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_manifest.dir\depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_manifest.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_manifest.dir\build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=14,15 "Built target test_manifest"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=12,13 "Built target test_manifest"
 .PHONY : CMakeFiles\test_manifest.dir\all
 
 # Build rule for subdir invocation for target.
@@ -281,7 +281,7 @@ test_manifest: CMakeFiles\test_manifest.dir\rule
 # codegen rule for target.
 CMakeFiles\test_manifest.dir\codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_manifest.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_manifest.dir\codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=14,15 "Finished codegen for target test_manifest"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=12,13 "Finished codegen for target test_manifest"
 .PHONY : CMakeFiles\test_manifest.dir\codegen
 
 # clean rule for target.
@@ -418,36 +418,36 @@ CMakeFiles\test_restart.dir\clean:
 .PHONY : CMakeFiles\test_restart.dir\clean
 
 #=============================================================================
-# Target rules for target CMakeFiles/test_fuzz.dir
+# Target rules for target CMakeFiles/test_min.dir
 
 # All Build rule for target.
-CMakeFiles\test_fuzz.dir\all: CMakeFiles\kvdb_lib.dir\all
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_fuzz.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_fuzz.dir\depend
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_fuzz.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_fuzz.dir\build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=12,13 "Built target test_fuzz"
-.PHONY : CMakeFiles\test_fuzz.dir\all
+CMakeFiles\test_min.dir\all: CMakeFiles\kvdb_lib.dir\all
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_min.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_min.dir\depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_min.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_min.dir\build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=16,17 "Built target test_min"
+.PHONY : CMakeFiles\test_min.dir\all
 
 # Build rule for subdir invocation for target.
-CMakeFiles\test_fuzz.dir\rule: cmake_check_build_system
+CMakeFiles\test_min.dir\rule: cmake_check_build_system
 	$(CMAKE_COMMAND) -E cmake_progress_start "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" 11
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\Makefile2 /nologo -$(MAKEFLAGS) CMakeFiles\test_fuzz.dir\all
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\Makefile2 /nologo -$(MAKEFLAGS) CMakeFiles\test_min.dir\all
 	$(CMAKE_COMMAND) -E cmake_progress_start "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" 0
-.PHONY : CMakeFiles\test_fuzz.dir\rule
+.PHONY : CMakeFiles\test_min.dir\rule
 
 # Convenience name for target.
-test_fuzz: CMakeFiles\test_fuzz.dir\rule
-.PHONY : test_fuzz
+test_min: CMakeFiles\test_min.dir\rule
+.PHONY : test_min
 
 # codegen rule for target.
-CMakeFiles\test_fuzz.dir\codegen:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_fuzz.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_fuzz.dir\codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=12,13 "Finished codegen for target test_fuzz"
-.PHONY : CMakeFiles\test_fuzz.dir\codegen
+CMakeFiles\test_min.dir\codegen:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_min.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_min.dir\codegen
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=16,17 "Finished codegen for target test_min"
+.PHONY : CMakeFiles\test_min.dir\codegen
 
 # clean rule for target.
-CMakeFiles\test_fuzz.dir\clean:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_fuzz.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_fuzz.dir\clean
-.PHONY : CMakeFiles\test_fuzz.dir\clean
+CMakeFiles\test_min.dir\clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_min.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_min.dir\clean
+.PHONY : CMakeFiles\test_min.dir\clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.
