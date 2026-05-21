@@ -180,7 +180,7 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
         for (auto& meta : sstable_metadata_) {
             if (meta.min_key.empty() || meta.max_key.empty()) {
                 try {
-                    auto full = SSTable::ReadMetadata(meta.filepath, sst_cache_.get(),
+                    auto full = SSTable::ReadMetadata(meta.filepath, *sst_cache_,
                                                        meta.manifest_seq);
                     meta.min_key = std::move(full.min_key);
                     meta.max_key = std::move(full.max_key);
@@ -452,12 +452,12 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
             if (!it->max_key.empty() && key > it->max_key) continue;
             {
                 BloomFilter bf;
-                if (sst_cache_ && sst_cache_->GetBloom(it->manifest_seq, bf) &&
+                if (sst_cache_->GetBloom(it->manifest_seq, bf) &&
                     bf.BitCount() > 0 && !bf.MightContain(key))
                     continue;
             }
             try {
-                hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val, sst_cache_.get(),
+                hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val, *sst_cache_,
                                          it->manifest_seq);
             } catch (const std::exception&) {}
         }
@@ -480,12 +480,12 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
                 if (scanned_ids.count(it->source_table_id)) continue;
                 {
                     BloomFilter bf;
-                    if (sst_cache_ && sst_cache_->GetBloom(it->manifest_seq, bf) &&
+                    if (sst_cache_->GetBloom(it->manifest_seq, bf) &&
                         bf.BitCount() > 0 && !bf.MightContain(key))
                         continue;
                 }
                 try {
-                    hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val, sst_cache_.get(),
+                    hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val, *sst_cache_,
                                          it->manifest_seq);
                 } catch (const std::exception&) {}
                 if (hit) break;
@@ -605,7 +605,7 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
             if (meta.level == 0) {
                 try {
                     auto iter = std::make_unique<SSTableIterator>(meta.filepath,
-                        sst_cache_.get(), meta.manifest_seq);
+                        *sst_cache_, meta.manifest_seq);
                     if (iter->Valid()) {
                         if (!lower.IsUnbounded()) iter->SeekToKey(lower.key);
                         if (iter->Valid()) sources.push_back(std::move(iter));
@@ -617,7 +617,7 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
         }
         for (auto& [lvl, files] : groups) {
             try {
-                auto li = std::make_unique<LevelIterator>(files, sst_cache_.get());
+                auto li = std::make_unique<LevelIterator>(files, *sst_cache_);
                 if (li->Valid()) {
                     if (!lower.IsUnbounded()) li->SeekToKey(lower.key);
                     if (li->Valid()) sources.push_back(std::move(li));
@@ -655,11 +655,11 @@ void LSMTreeEngine::DoFlush(std::shared_ptr<MemTable> frozen_memtable) {
 
     size_t entry_count = frozen_memtable->EntryCount();
     auto walk = BPlusTree::MemTableWalk(frozen_memtable->GetTree());
-    SSTable::WriteFromWalk(filepath, walk, entry_count, sst_cache_.get(), seq);
+    SSTable::WriteFromWalk(filepath, walk, entry_count, *sst_cache_, seq);
 
     SSTable::Metadata meta;
     try {
-        meta = SSTable::ReadMetadata(filepath, sst_cache_.get(), seq);
+        meta = SSTable::ReadMetadata(filepath, *sst_cache_, seq);
     } catch (const std::exception& e) {
         std::cerr << "ReadMetadata failed: " << e.what() << std::endl;
         auto entries = SSTable::ReadAll(filepath);
@@ -741,7 +741,7 @@ void LSMTreeEngine::CompactLevel(int from_level, int top_level) {
     std::vector<SSTable::Metadata> outputs;
     std::vector<uint64_t> garbage;
     SSTable::Compact(inputs, data_dir_, seq, to_level,
-                     max_sst, is_last, "", "", outputs, garbage);
+                     max_sst, is_last, "", "", outputs, garbage, *sst_cache_);
 
     {
         std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);

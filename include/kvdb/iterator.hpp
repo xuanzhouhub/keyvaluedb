@@ -69,9 +69,9 @@ struct SSTableIterator : SourceIterator {
     KeyValuePair current;
 
     SSTableIterator(const std::string& filepath,
-                    BlockReader* reader = nullptr,
-                    uint64_t manifest_seq = 0)
-        : reader_(reader), manifest_seq_(manifest_seq) {
+                    BlockReader& reader,
+                    uint64_t manifest_seq)
+        : reader_(&reader), manifest_seq_(manifest_seq) {
         file.open(filepath, std::ios::binary);
         if (!file.is_open()) { total_entries = 0; return; }
         read_u32(); read_u32(); read_u32();
@@ -187,8 +187,8 @@ private:
 class LevelIterator : public SourceIterator {
 public:
     LevelIterator(const std::vector<SSTable::Metadata>& files,
-                  BlockReader* reader = nullptr)
-        : files_(files), reader_(reader) {
+                  BlockReader& reader)
+        : files_(files), reader_(&reader) {
         std::sort(files_.begin(), files_.end(),
                   [](const SSTable::Metadata& a, const SSTable::Metadata& b)
                   { return a.min_key < b.min_key; });
@@ -206,7 +206,8 @@ public:
         while (idx_ < files_.size() && !files_[idx_].max_key.empty() && files_[idx_].max_key < key)
             ++idx_;
         if (idx_ < files_.size()) {
-            current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath);
+            current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath,
+                                                          *reader_, files_[idx_].manifest_seq);
             ++idx_;
             if (current_->Valid()) current_->SeekToKey(key);
             if (!current_->Valid()) OpenNext();
@@ -217,7 +218,7 @@ private:
     void OpenNext() {
         while (idx_ < files_.size()) {
             current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath,
-                                                          reader_, files_[idx_].manifest_seq);
+                                                          *reader_, files_[idx_].manifest_seq);
             ++idx_;
             if (current_->Valid()) return;
         }

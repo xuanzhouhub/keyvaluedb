@@ -1,0 +1,46 @@
+Start testing: May 21 11:09 中国标准时间
+----------------------------------------------------------
+1/9 Testing: test_memtable
+1/9 Test: test_memtable
+Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_memtable.exe"
+Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
+"test_memtable" start time: May 21 11:09 中国标准时间
+Output:
+----------------------------------------------------------
+Running MemTable Tests...
+
+
+=== Test Summary ===
+Total:  195
+Passed: 195
+Failed: 0
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"test_memtable" end time: May 21 11:09 中国标准时间
+"test_memtable" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/9 Testing: test_sstable
+2/9 Test: test_sstable
+Command: "C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin/test_sstable.exe"
+Directory: C:/Users/lenovo/Documents/AI Coding/keyvaluedb/build/bin
+"test_sstable" start time: May 21 11:09 中国标准时间
+Output:
+----------------------------------------------------------
+Running SSTable Tests...
+
+
+=== Test Summary ===
+Total:  3167
+Passed: 3167
+Failed: 0
+<end of output>
+Test time =   0.46 sec
+----------------------------------------------------------
+Test Passed.
+"test_sstable" end time: May 21 11:09 中国标准时间
+"test_sstable" time elapsed: 00:00:00
+----------------------------------------------------------
+
