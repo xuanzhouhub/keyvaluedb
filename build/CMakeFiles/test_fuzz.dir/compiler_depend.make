@@ -94,23 +94,25 @@ CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Micros
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\cctype"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\ctype.h"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\iterator.hpp"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\block_cache.hpp"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\sstable.hpp"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\bloom.hpp"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\cmath"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_bit_utils.hpp"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\memtable.hpp"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\bptree.hpp"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\types.hpp"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\algorithm"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_heap_algorithms.hpp"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_minmax.hpp"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_bit_utils.hpp"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\memtable.hpp"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\snappy.hpp"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\sstable.hpp"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\bloom.hpp"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\cmath"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\fstream"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_filebuf.hpp"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\streambuf"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xiosbase"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\share.h"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\list"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\mutex"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_chrono.hpp"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\ctime"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\time.h"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\ratio"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xtimec.h"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\system_error"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_system_error_abi.hpp"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\cerrno"
@@ -120,13 +122,25 @@ CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Micros
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\atomic"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xthreads.h"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_threads_core.hpp"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xtimec.h"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\ctime"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\time.h"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xlocale"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\thread"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\memory"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\typeinfo"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vcruntime_typeinfo.h"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\process.h"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_startup.h"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\math.h"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vcruntime_startup.h"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\unordered_map"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xhash"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xbit_ops.h"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xnode_handle.h"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\snappy.hpp"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\fstream"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_filebuf.hpp"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\streambuf"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xiosbase"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\share.h"
+CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xlocale"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xfacet"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xlocinfo"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_xlocinfo_types.hpp"
@@ -141,20 +155,6 @@ CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Micros
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\deque"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\sstream"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\kv_cache.hpp"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\list"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\mutex"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_chrono.hpp"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\ratio"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\thread"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\process.h"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_startup.h"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\math.h"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vcruntime_startup.h"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\unordered_map"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xhash"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xbit_ops.h"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xnode_handle.h"
-CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\block_cache.hpp"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\manifest.hpp"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\snp_tracker.hpp"
 CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\set"
@@ -665,17 +665,21 @@ CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Micros
 
 "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\iterator.hpp":
 
-"C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\bptree.hpp":
+"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\datetimeapi.h":
 
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_bit_utils.hpp":
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\excpt.h":
+
+"C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\block_cache.hpp":
+
+"C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\sstable.hpp":
+
+"C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\bloom.hpp":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector":
 
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\algorithm":
 
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\map":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_minmax.hpp":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vector":
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_bit_utils.hpp":
 
 "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\mcx.h":
 
@@ -683,23 +687,37 @@ CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Micros
 
 "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\memtable.hpp":
 
-"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\apisetcconv.h":
+"C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\bptree.hpp":
 
-"C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\snappy.hpp":
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\map":
 
-"C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\sstable.hpp":
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_minmax.hpp":
 
-"C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\bloom.hpp":
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\list":
 
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\fstream":
+"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\threadpoolapiset.h":
 
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_filebuf.hpp":
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\clocale":
 
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\streambuf":
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_chrono.hpp":
 
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xiosbase":
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xlocmon":
 
-"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\share.h":
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\ctime":
+
+"C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\protocol.hpp":
+
+"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\time.h":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\chrono":
+
+"C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\client.hpp":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\ratio":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\typeinfo":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xtimec.h":
 
 "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\objidlbase.h":
 
@@ -721,23 +739,45 @@ CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Micros
 
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_threads_core.hpp":
 
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\typeinfo":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xtimec.h":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xlocmon":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\ctime":
-
-"C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\protocol.hpp":
-
-"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\time.h":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xlocale":
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\thread":
 
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\memory":
 
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\vcruntime_typeinfo.h":
+
+"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\process.h":
+
+"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\objbase.h":
+
+"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_startup.h":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\unordered_map":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xhash":
+
+"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\securitybaseapi.h":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xbit_ops.h":
+
+"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\qos.h":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xnode_handle.h":
+
+"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\apisetcconv.h":
+
+"C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\snappy.hpp":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\fstream":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_filebuf.hpp":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\streambuf":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xiosbase":
+
+"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\share.h":
+
+"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xlocale":
 
 "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\errhandlingapi.h":
 
@@ -746,12 +786,6 @@ CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Micros
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xlocinfo":
 
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_xlocinfo_types.hpp":
-
-"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\threadpoolapiset.h":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\__msvc_chrono.hpp":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\clocale":
 
 "C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\locale.h":
 
@@ -776,40 +810,6 @@ CMakeFiles\test_fuzz.dir\tests\test_fuzz.cpp.obj: "C:\Program Files (x86)\Micros
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\deque":
 
 "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\kv_cache.hpp":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\list":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\chrono":
-
-"C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\client.hpp":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\ratio":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\thread":
-
-"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\process.h":
-
-"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\objbase.h":
-
-"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt\corecrt_startup.h":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\unordered_map":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xhash":
-
-"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\securitybaseapi.h":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xbit_ops.h":
-
-"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\shared\qos.h":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\xnode_handle.h":
-
-"C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\um\datetimeapi.h":
-
-"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\include\excpt.h":
-
-"C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\block_cache.hpp":
 
 "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\include\kvdb\snp_tracker.hpp":
 

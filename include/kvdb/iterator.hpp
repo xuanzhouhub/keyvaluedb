@@ -130,6 +130,8 @@ private:
         block_entries = read_u32_internal();
         read_entries += block_entries;
         ++cur_block_;
+        if (cache_ && manifest_seq_ != 0)
+            cache_->PutBlock(manifest_seq_, cur_block_ - 1, block_data, block_entries);
         ParseCurrent();
     }
 
