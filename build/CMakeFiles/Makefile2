@@ -62,7 +62,6 @@ all: CMakeFiles\test_server.dir\all
 all: CMakeFiles\test_wfw.dir\all
 all: CMakeFiles\test_small.dir\all
 all: CMakeFiles\test_restart.dir\all
-all: CMakeFiles\test_min.dir\all
 .PHONY : all
 
 # The main recursive "codegen" target.
@@ -76,7 +75,6 @@ codegen: CMakeFiles\test_server.dir\codegen
 codegen: CMakeFiles\test_wfw.dir\codegen
 codegen: CMakeFiles\test_small.dir\codegen
 codegen: CMakeFiles\test_restart.dir\codegen
-codegen: CMakeFiles\test_min.dir\codegen
 .PHONY : codegen
 
 # The main recursive "preinstall" target.
@@ -94,7 +92,6 @@ clean: CMakeFiles\test_server.dir\clean
 clean: CMakeFiles\test_wfw.dir\clean
 clean: CMakeFiles\test_small.dir\clean
 clean: CMakeFiles\test_restart.dir\clean
-clean: CMakeFiles\test_min.dir\clean
 .PHONY : clean
 
 #=============================================================================
@@ -168,7 +165,7 @@ CMakeFiles\test_memtable.dir\clean:
 CMakeFiles\test_sstable.dir\all: CMakeFiles\kvdb_lib.dir\all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_sstable.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_sstable.dir\depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_sstable.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_sstable.dir\build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=24,25 "Built target test_sstable"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=22,23 "Built target test_sstable"
 .PHONY : CMakeFiles\test_sstable.dir\all
 
 # Build rule for subdir invocation for target.
@@ -185,7 +182,7 @@ test_sstable: CMakeFiles\test_sstable.dir\rule
 # codegen rule for target.
 CMakeFiles\test_sstable.dir\codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_sstable.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_sstable.dir\codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=24,25 "Finished codegen for target test_sstable"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=22,23 "Finished codegen for target test_sstable"
 .PHONY : CMakeFiles\test_sstable.dir\codegen
 
 # clean rule for target.
@@ -232,7 +229,7 @@ CMakeFiles\test_engine.dir\clean:
 CMakeFiles\test_wal.dir\all: CMakeFiles\kvdb_lib.dir\all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_wal.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_wal.dir\depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_wal.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_wal.dir\build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=26,27 "Built target test_wal"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=24,25 "Built target test_wal"
 .PHONY : CMakeFiles\test_wal.dir\all
 
 # Build rule for subdir invocation for target.
@@ -249,7 +246,7 @@ test_wal: CMakeFiles\test_wal.dir\rule
 # codegen rule for target.
 CMakeFiles\test_wal.dir\codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_wal.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_wal.dir\codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=26,27 "Finished codegen for target test_wal"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=24,25 "Finished codegen for target test_wal"
 .PHONY : CMakeFiles\test_wal.dir\codegen
 
 # clean rule for target.
@@ -296,7 +293,7 @@ CMakeFiles\test_manifest.dir\clean:
 CMakeFiles\test_server.dir\all: CMakeFiles\kvdb_lib.dir\all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_server.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_server.dir\depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_server.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_server.dir\build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=20,21 "Built target test_server"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=18,19 "Built target test_server"
 .PHONY : CMakeFiles\test_server.dir\all
 
 # Build rule for subdir invocation for target.
@@ -313,7 +310,7 @@ test_server: CMakeFiles\test_server.dir\rule
 # codegen rule for target.
 CMakeFiles\test_server.dir\codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_server.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_server.dir\codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=20,21 "Finished codegen for target test_server"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=18,19 "Finished codegen for target test_server"
 .PHONY : CMakeFiles\test_server.dir\codegen
 
 # clean rule for target.
@@ -328,7 +325,7 @@ CMakeFiles\test_server.dir\clean:
 CMakeFiles\test_wfw.dir\all: CMakeFiles\kvdb_lib.dir\all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_wfw.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_wfw.dir\depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_wfw.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_wfw.dir\build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=28,29 "Built target test_wfw"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=26,27 "Built target test_wfw"
 .PHONY : CMakeFiles\test_wfw.dir\all
 
 # Build rule for subdir invocation for target.
@@ -345,7 +342,7 @@ test_wfw: CMakeFiles\test_wfw.dir\rule
 # codegen rule for target.
 CMakeFiles\test_wfw.dir\codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_wfw.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_wfw.dir\codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=28,29 "Finished codegen for target test_wfw"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=26,27 "Finished codegen for target test_wfw"
 .PHONY : CMakeFiles\test_wfw.dir\codegen
 
 # clean rule for target.
@@ -360,7 +357,7 @@ CMakeFiles\test_wfw.dir\clean:
 CMakeFiles\test_small.dir\all: CMakeFiles\kvdb_lib.dir\all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_small.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_small.dir\depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_small.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_small.dir\build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=22,23 "Built target test_small"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=20,21 "Built target test_small"
 .PHONY : CMakeFiles\test_small.dir\all
 
 # Build rule for subdir invocation for target.
@@ -377,7 +374,7 @@ test_small: CMakeFiles\test_small.dir\rule
 # codegen rule for target.
 CMakeFiles\test_small.dir\codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_small.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_small.dir\codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=22,23 "Finished codegen for target test_small"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=20,21 "Finished codegen for target test_small"
 .PHONY : CMakeFiles\test_small.dir\codegen
 
 # clean rule for target.
@@ -392,7 +389,7 @@ CMakeFiles\test_small.dir\clean:
 CMakeFiles\test_restart.dir\all: CMakeFiles\kvdb_lib.dir\all
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_restart.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_restart.dir\depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_restart.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_restart.dir\build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=18,19 "Built target test_restart"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=16,17 "Built target test_restart"
 .PHONY : CMakeFiles\test_restart.dir\all
 
 # Build rule for subdir invocation for target.
@@ -409,45 +406,13 @@ test_restart: CMakeFiles\test_restart.dir\rule
 # codegen rule for target.
 CMakeFiles\test_restart.dir\codegen:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_restart.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_restart.dir\codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=18,19 "Finished codegen for target test_restart"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=16,17 "Finished codegen for target test_restart"
 .PHONY : CMakeFiles\test_restart.dir\codegen
 
 # clean rule for target.
 CMakeFiles\test_restart.dir\clean:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_restart.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_restart.dir\clean
 .PHONY : CMakeFiles\test_restart.dir\clean
-
-#=============================================================================
-# Target rules for target CMakeFiles/test_min.dir
-
-# All Build rule for target.
-CMakeFiles\test_min.dir\all: CMakeFiles\kvdb_lib.dir\all
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_min.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_min.dir\depend
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_min.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_min.dir\build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=16,17 "Built target test_min"
-.PHONY : CMakeFiles\test_min.dir\all
-
-# Build rule for subdir invocation for target.
-CMakeFiles\test_min.dir\rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" 11
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\Makefile2 /nologo -$(MAKEFLAGS) CMakeFiles\test_min.dir\all
-	$(CMAKE_COMMAND) -E cmake_progress_start "C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" 0
-.PHONY : CMakeFiles\test_min.dir\rule
-
-# Convenience name for target.
-test_min: CMakeFiles\test_min.dir\rule
-.PHONY : test_min
-
-# codegen rule for target.
-CMakeFiles\test_min.dir\codegen:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_min.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_min.dir\codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="C:\Users\lenovo\Documents\AI Coding\keyvaluedb\build\CMakeFiles" --progress-num=16,17 "Finished codegen for target test_min"
-.PHONY : CMakeFiles\test_min.dir\codegen
-
-# clean rule for target.
-CMakeFiles\test_min.dir\clean:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles\test_min.dir\build.make /nologo -$(MAKEFLAGS) CMakeFiles\test_min.dir\clean
-.PHONY : CMakeFiles\test_min.dir\clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.

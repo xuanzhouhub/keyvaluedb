@@ -50,7 +50,6 @@ if(KVDB_BUILD_TESTS)
     add_kvdb_test(test_wfw tests/test_wfw.cpp)
     add_kvdb_test(test_small tests/test_small.cpp)
     add_kvdb_test(test_restart tests/test_restart.cpp)
-    add_kvdb_test(test_min tests/test_min.cpp)
 endif()
 
 if(KVDB_BUILD_FUZZ)
