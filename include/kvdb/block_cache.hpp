@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <list>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -23,10 +24,10 @@ public:
                          std::vector<std::string>& first_keys_out) override;
     void PutBlockOffsets(uint64_t seq, const std::vector<uint64_t>& offsets,
                          const std::vector<std::string>& first_keys) override;
-    bool GetBlock(uint64_t seq, uint32_t block_idx,
-                  std::string& data_out, uint32_t& entry_count_out) override;
+    std::shared_ptr<const std::string> GetBlock(
+        uint64_t seq, uint32_t block_idx) override;
     void PutBlock(uint64_t seq, uint32_t block_idx,
-                  const std::string& data, uint32_t entry_count) override;
+                  std::string data) override;
     void Invalidate(uint64_t seq) override;
 
 private:
@@ -42,18 +43,13 @@ private:
         std::list<uint64_t>::iterator lru_it;
     };
 
-    struct CachedBlock {
-        std::string data;
-        uint32_t entry_count;
-        std::list<uint64_t>::iterator lru_it;
-    };
-
     mutable std::mutex mutex_;
     std::unordered_map<uint64_t, CachedHeavy> heavy_map_;
     std::list<uint64_t> heavy_lru_;
     size_t max_meta_;
 
-    std::unordered_map<uint64_t, CachedBlock> block_map_;
+    std::unordered_map<uint64_t, std::shared_ptr<std::string>> block_data_;
+    std::unordered_map<uint64_t, std::list<uint64_t>::iterator> block_lru_iters_;
     std::list<uint64_t> block_lru_;
     size_t max_blocks_;
     size_t max_bytes_;
@@ -136,47 +132,46 @@ inline void SSTableCache::PutBlockOffsets(
     heavy_map_[seq] = std::move(ch);
 }
 
-inline bool SSTableCache::GetBlock(uint64_t seq, uint32_t block_idx,
-                                   std::string& data_out,
-                                   uint32_t& entry_count_out) {
+inline std::shared_ptr<const std::string> SSTableCache::GetBlock(
+    uint64_t seq, uint32_t block_idx) {
     uint64_t key = BlockKey(seq, block_idx);
     std::lock_guard<std::mutex> lock(mutex_);
-    auto it = block_map_.find(key);
-    if (it == block_map_.end()) return false;
-    data_out = it->second.data;
-    entry_count_out = it->second.entry_count;
-    block_lru_.erase(it->second.lru_it);
-    block_lru_.push_front(key);
-    it->second.lru_it = block_lru_.begin();
-    return true;
+    auto it = block_data_.find(key);
+    if (it == block_data_.end()) return nullptr;
+    auto lru_it = block_lru_iters_.find(key);
+    if (lru_it != block_lru_iters_.end()) {
+        block_lru_.erase(lru_it->second);
+        block_lru_.push_front(key);
+        lru_it->second = block_lru_.begin();
+    }
+    return it->second;
 }
 
 inline void SSTableCache::PutBlock(uint64_t seq, uint32_t block_idx,
-                                   const std::string& data,
-                                   uint32_t entry_count) {
+                                   std::string data) {
     uint64_t key = BlockKey(seq, block_idx);
     std::lock_guard<std::mutex> lock(mutex_);
-    auto it = block_map_.find(key);
-    if (it != block_map_.end()) {
-        current_bytes_ -= it->second.data.size();
-        it->second.data = data;
-        it->second.entry_count = entry_count;
-        current_bytes_ += data.size();
-        block_lru_.erase(it->second.lru_it);
-        block_lru_.push_front(key);
-        it->second.lru_it = block_lru_.begin();
+    auto it = block_data_.find(key);
+    if (it != block_data_.end()) {
+        current_bytes_ -= it->second->size();
+        *it->second = std::move(data);
+        current_bytes_ += it->second->size();
+        auto lru_it = block_lru_iters_.find(key);
+        if (lru_it != block_lru_iters_.end()) {
+            block_lru_.erase(lru_it->second);
+            block_lru_.push_front(key);
+            lru_it->second = block_lru_.begin();
+        }
         return;
     }
-    while ((block_map_.size() >= max_blocks_ ||
+    while ((block_data_.size() >= max_blocks_ ||
             current_bytes_ + data.size() > max_bytes_) && !block_lru_.empty())
         EvictBlock();
     block_lru_.push_front(key);
-    CachedBlock cb;
-    cb.data = data;
-    cb.entry_count = entry_count;
-    cb.lru_it = block_lru_.begin();
-    block_map_[key] = std::move(cb);
-    current_bytes_ += data.size();
+    auto sp = std::make_shared<std::string>(std::move(data));
+    block_data_[key] = sp;
+    block_lru_iters_[key] = block_lru_.begin();
+    current_bytes_ += sp->size();
 }
 
 inline void SSTableCache::Invalidate(uint64_t seq) {
@@ -184,11 +179,14 @@ inline void SSTableCache::Invalidate(uint64_t seq) {
     heavy_map_.erase(seq);
     uint64_t lo = BlockKey(seq, 0);
     uint64_t hi = BlockKey(seq + 1, 0);
-    for (auto it = block_map_.begin(); it != block_map_.end(); ) {
+    for (auto it = block_data_.begin(); it != block_data_.end(); ) {
         if (it->first >= lo && it->first < hi) {
-            current_bytes_ -= it->second.data.size();
-            block_lru_.erase(it->second.lru_it);
-            it = block_map_.erase(it);
+            current_bytes_ -= it->second->size();
+            auto lru_it = block_lru_iters_.find(it->first);
+            if (lru_it != block_lru_iters_.end())
+                block_lru_.erase(lru_it->second);
+            block_lru_iters_.erase(it->first);
+            it = block_data_.erase(it);
         } else { ++it; }
     }
     block_lru_.remove_if([lo, hi](uint64_t k) { return k >= lo && k < hi; });
@@ -197,10 +195,11 @@ inline void SSTableCache::Invalidate(uint64_t seq) {
 inline void SSTableCache::EvictBlock() {
     if (block_lru_.empty()) return;
     uint64_t key = block_lru_.back();
-    auto it = block_map_.find(key);
-    if (it != block_map_.end()) {
-        current_bytes_ -= it->second.data.size();
-        block_map_.erase(it);
+    auto it = block_data_.find(key);
+    if (it != block_data_.end()) {
+        current_bytes_ -= it->second->size();
+        block_data_.erase(it);
+        block_lru_iters_.erase(key);
     }
     block_lru_.pop_back();
 }

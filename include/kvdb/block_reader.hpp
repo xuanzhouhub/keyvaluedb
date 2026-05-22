@@ -3,6 +3,7 @@
 #include "sstable.hpp"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -22,10 +23,11 @@ public:
                                  const std::vector<uint64_t>& offsets,
                                  const std::vector<std::string>& first_keys) = 0;
 
-    virtual bool GetBlock(uint64_t seq, uint32_t block_idx,
-                          std::string& data_out, uint32_t& entry_count_out) = 0;
+    virtual std::shared_ptr<const std::string> GetBlock(
+        uint64_t seq, uint32_t block_idx) = 0;
+
     virtual void PutBlock(uint64_t seq, uint32_t block_idx,
-                          const std::string& data, uint32_t entry_count) = 0;
+                          std::string data) = 0;
 
     virtual void Invalidate(uint64_t seq) = 0;
 };

@@ -61,6 +61,7 @@ struct MemTableSource : SourceIterator {
 struct SSTableIterator : SourceIterator {
     std::ifstream file;
     std::string block_data;
+    std::shared_ptr<const std::string> cached_block_;
     size_t block_pos = 0;
     uint32_t block_entries = 0;
     uint32_t total_entries = 0;
@@ -143,20 +144,19 @@ private:
 
     void ReadNextBlock() {
         pos = 0;
-        if (read_entries >= total_entries) { block_entries = 0; return; }
+        if (read_entries >= total_entries) { block_entries = 0; cached_block_.reset(); return; }
         if (reader_ && manifest_seq_ != 0) {
-            std::string cached;
-            uint32_t ec;
-            if (reader_->GetBlock(manifest_seq_, cur_block_, cached, ec)) {
-                block_data = std::move(cached);
+            cached_block_ = reader_->GetBlock(manifest_seq_, cur_block_);
+            if (cached_block_) {
                 block_pos = 0;
-                block_entries = ec > 0 ? ec : read_u32_internal_ptr(block_data.data(), block_data.size());
+                block_entries = read_u32_internal_ptr(cached_block_->data(), cached_block_->size());
                 read_entries += block_entries;
                 ++cur_block_;
-                ParseCurrentPtr(block_data.data(), block_data.size());
+                ParseCurrentPtr(cached_block_->data(), cached_block_->size());
                 return;
             }
         }
+        cached_block_.reset();
         read_u32();
         uint8_t comp = uint8_t(file.get());
         uint32_t csz = read_u32();
@@ -168,7 +168,7 @@ private:
         ++cur_block_;
         ParseCurrent();
         if (populate_ && reader_ && manifest_seq_ != 0)
-            reader_->PutBlock(manifest_seq_, cur_block_ - 1, block_data, block_entries);
+            reader_->PutBlock(manifest_seq_, cur_block_ - 1, block_data);
     }
 
     uint32_t read_u32_internal() {
@@ -209,6 +209,15 @@ public:
         OpenNext();
     }
 
+    LevelIterator(const std::vector<SSTable::Metadata>& files,
+                  BlockReader& reader)
+        : files_(files), reader_(&reader) {
+        std::sort(files_.begin(), files_.end(),
+                  [](const SSTable::Metadata& a, const SSTable::Metadata& b)
+                  { return a.min_key < b.min_key; });
+        OpenNext();
+    }
+
     bool Valid() const override { return current_ && current_->Valid(); }
     const KeyValuePair& Current() const override { return current_->Current(); }
     void Next() override {
@@ -220,7 +229,11 @@ public:
         while (idx_ < files_.size() && !files_[idx_].max_key.empty() && files_[idx_].max_key < key)
             ++idx_;
         if (idx_ < files_.size()) {
-            current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath);
+            if (reader_)
+                current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath,
+                    *reader_, files_[idx_].manifest_seq);
+            else
+                current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath);
             ++idx_;
             if (current_->Valid()) current_->SeekToKey(key);
             if (!current_->Valid()) OpenNext();
@@ -230,7 +243,11 @@ public:
 private:
     void OpenNext() {
         while (idx_ < files_.size()) {
-            current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath);
+            if (reader_)
+                current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath,
+                    *reader_, files_[idx_].manifest_seq);
+            else
+                current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath);
             ++idx_;
             if (current_->Valid()) return;
         }
@@ -239,6 +256,7 @@ private:
 
     std::vector<SSTable::Metadata> files_;
     size_t idx_ = 0;
+    BlockReader* reader_ = nullptr;
     std::unique_ptr<SSTableIterator> current_;
 };
 

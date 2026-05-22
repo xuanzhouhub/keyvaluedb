@@ -208,7 +208,7 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
         fkeys.push_back(std::move(bd.first_key));
         if (cache && !bd.uncompressed.empty())
             cache->PutBlock(manifest_seq, static_cast<uint32_t>(bi),
-                            bd.uncompressed, 0);
+                            bd.uncompressed);
     }
 
     uint64_t filter_off = static_cast<uint64_t>(file.tellp());
@@ -295,31 +295,53 @@ bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
                          BlockReader* cache, uint64_t manifest_seq) {
     auto meta=ReadMetadata(filepath, cache);
     if(meta.block_first_keys.empty())return false;
+
+    auto read_u32_ptr = [](const char* d, size_t size) -> uint32_t {
+        if (4 > size) return 0;
+        return uint8_t(d[0]) | (uint8_t(d[1])<<8)
+             | (uint8_t(d[2])<<16) | (uint8_t(d[3])<<24);
+    };
+
+    auto scanBlock = [&](const char* d, size_t sz) -> bool {
+        if (sz < 4) return false;
+        size_t off = 4;
+        uint32_t n = read_u32_ptr(d, size_t(-1));
+        for (uint32_t i = 0; i < n; ++i) {
+            if (off + 4 > sz) break;
+            uint32_t kl = read_u32_ptr(d + off, sz - off); off += 4;
+            if (off + kl > sz) break;
+            std::string k(d + off, kl); off += kl;
+            if (off + 4 > sz) break;
+            uint32_t vl = read_u32_ptr(d + off, sz - off); off += 4;
+            if (off + vl > sz) break;
+            std::string v(d + off, vl); off += vl;
+            if (off + 8 + 1 > sz) break;
+            uint64_t ts = 0;
+            for (int b = 0; b < 8; ++b) ts |= uint64_t(uint8_t(d[off++])) << (b*8);
+            uint8_t fl = uint8_t(d[off++]);
+            if (k == key && ts <= read_ts) {
+                if (fl & 1) { value_out.clear(); return true; }
+                value_out = std::move(v);
+                return true;
+            }
+        }
+        return false;
+    };
+
     uint32_t target=0;
     for(uint32_t i=0;i<meta.block_first_keys.size();++i){if(key<meta.block_first_keys[i])break;target=i;}
     auto search=[&](uint32_t idx)->bool{
         if(idx>=meta.block_offsets.size())return false;
         if (cache) {
-            std::string block_data;
-            uint32_t entry_count;
-            if (cache->GetBlock(manifest_seq, idx, block_data, entry_count)) {
-                std::istringstream bs(std::move(block_data));
-                auto r32=[&](){uint32_t v=0;v|=uint8_t(bs.get());v|=uint8_t(bs.get())<<8;v|=uint8_t(bs.get())<<16;v|=uint8_t(bs.get())<<24;return v;};
-                uint32_t n=r32();
-                for(uint32_t i=0;i<n;++i){uint32_t kl=r32();std::string k(kl,0);bs.read(&k[0],kl);uint32_t vl=r32();std::string v(vl,0);bs.read(&v[0],vl);uint64_t ts=0;for(int b=0;b<8;++b)ts|=static_cast<uint64_t>(static_cast<uint8_t>(bs.get()))<<(b*8);uint8_t fl=uint8_t(bs.get());if(k==key&&ts<=read_ts){if(fl&1){value_out.clear();return true;}value_out=std::move(v);return true;}}
-                return false;
-            }
+            auto block = cache->GetBlock(manifest_seq, idx);
+            if (block) return scanBlock(block->data(), block->size());
         }
         std::ifstream f(filepath,std::ios::binary);
         f.seekg(static_cast<std::streamoff>(meta.block_offsets[idx]));
         ReadUint32LE(f);f.seekg(1,std::ios::cur);
         uint32_t csz=ReadUint32LE(f);
         std::vector<char> cbuf(csz);f.read(cbuf.data(),static_cast<std::streamsize>(csz));DecompressBlock(cbuf);
-        std::istringstream bs(std::string(cbuf.begin(),cbuf.end()));
-        auto r32=[&](){uint32_t v=0;v|=uint8_t(bs.get());v|=uint8_t(bs.get())<<8;v|=uint8_t(bs.get())<<16;v|=uint8_t(bs.get())<<24;return v;};
-        uint32_t n=r32();
-        for(uint32_t i=0;i<n;++i){uint32_t kl=r32();std::string k(kl,0);bs.read(&k[0],kl);uint32_t vl=r32();std::string v(vl,0);bs.read(&v[0],vl);uint64_t ts=0;for(int b=0;b<8;++b)ts|=static_cast<uint64_t>(static_cast<uint8_t>(bs.get()))<<(b*8);uint8_t fl=uint8_t(bs.get());if(k==key&&ts<=read_ts){if(fl&1)return false;value_out=std::move(v);return true;}}
-        return false;
+        return scanBlock(cbuf.data(), cbuf.size());
     };
     if(search(target))return true;
     if(target>0&&search(target-1))return true;
@@ -362,7 +384,8 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
                       const std::string& range_lower,
                       const std::string& range_upper,
                       std::vector<Metadata>& outputs,
-                      std::vector<std::string>& garbage_files) {
+                      std::vector<std::string>& garbage_files,
+                      BlockReader& cache) {
     struct MergeSrc {
         std::unique_ptr<SourceIterator> iter;
         KeyValuePair cur;
@@ -377,7 +400,8 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
 
     for (auto& in : inputs) {
         if (in.level == 0) {
-            auto it = std::make_unique<SSTableIterator>(in.filepath);
+            auto it = std::make_unique<SSTableIterator>(in.filepath, cache,
+                                                          in.manifest_seq, false);
             if (it->Valid()) sources.emplace_back(std::move(it));
         }
     }
@@ -387,7 +411,7 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
         if (in.level > 0) level_groups[in.level].push_back(in);
     }
     for (auto& [lvl, files] : level_groups) {
-        auto li = std::make_unique<LevelIterator>(files);
+        auto li = std::make_unique<LevelIterator>(files, cache);
         if (li->Valid()) sources.emplace_back(std::move(li));
     }
 
