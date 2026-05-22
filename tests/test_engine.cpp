@@ -657,6 +657,58 @@ void TestKVCacheTombstone() {
     CleanupTestDir();
 }
 
+void TestRangeScanCachedBlocks() {
+    CleanupTestDir();
+    {
+        kvdb::LSMTreeEngine engine(kTestDataDir, 4096);
+        for (int i = 0; i < 32; ++i) {
+            engine.Insert("key" + std::to_string(i), "val" + std::to_string(i));
+        }
+        engine.Flush();
+        engine.WaitForPendingFlushes();
+        ASSERT_TRUE(engine.SSTableCount() > 0);
+
+        auto iter = engine.RangeScan();
+        int count = 0;
+        while (iter.Valid()) { ++count; iter.Next(); }
+        ASSERT_EQ(32, count);
+
+        auto bounded = engine.RangeScan(
+            kvdb::RangeBound::Inclusive("key10"),
+            kvdb::RangeBound::Inclusive("key19"));
+        count = 0;
+        while (bounded.Valid()) { ++count; bounded.Next(); }
+        ASSERT_EQ(10, count);
+    }
+    CleanupTestDir();
+}
+
+void TestCompactionCacheReadIntegrity() {
+    CleanupTestDir();
+    {
+        kvdb::LSMTreeEngine engine(kTestDataDir, 4096);
+        for (int i = 0; i < 64; ++i) {
+            engine.Insert("key" + std::to_string(i), "val" + std::to_string(i));
+            engine.Flush();
+        }
+        engine.WaitForPendingFlushes();
+
+        std::this_thread::sleep_for(std::chrono::seconds(4));
+
+        for (int i = 0; i < 64; ++i) {
+            std::string v;
+            ASSERT_TRUE(engine.Lookup("key" + std::to_string(i), v));
+            ASSERT_STREQ("val" + std::to_string(i), v);
+        }
+
+        auto iter = engine.RangeScan();
+        int count = 0;
+        while (iter.Valid()) { ++count; iter.Next(); }
+        ASSERT_EQ(64, count);
+    }
+    CleanupTestDir();
+}
+
 void RunTests() {
     std::cout << "Running LSMTreeEngine Tests...\n\n";
 
@@ -691,6 +743,8 @@ void RunTests() {
     TestKVCacheHit();
     TestKVCacheBlobNotCached();
     TestKVCacheTombstone();
+    TestRangeScanCachedBlocks();
+    TestCompactionCacheReadIntegrity();
 }
 
 } // namespace kvdb_test
