@@ -23,6 +23,7 @@ static const int kDurationSec = 20;
 static const int kKillIntervalSec = 4;
 static const int kKeyPoolSize = 100;
 static const int kValueMaxLen = 1024;
+static const int kRangeScanEveryN = 50;
 
 struct FuzzStats {
     std::atomic<uint64_t> writes_ok{0};
@@ -63,6 +64,7 @@ static void ClientThread(int id) {
 
     auto start = std::chrono::steady_clock::now();
     kvdb::Client client;
+    int op_count = 0;
 
     while (!g_stop.load()) {
         auto elapsed = std::chrono::steady_clock::now() - start;
@@ -77,6 +79,7 @@ static void ClientThread(int id) {
         }
 
         std::string key = "fuzz_" + std::to_string(key_dist(rng));
+        ++op_count;
 
         if (op_dist(rng) == 0) {
             std::string value = RandomValue(rng);
@@ -91,6 +94,10 @@ static void ClientThread(int id) {
                 g_stats.writes_fail++;
                 client.Disconnect();
             }
+        } else if (op_count % kRangeScanEveryN == 0) {
+            std::vector<kvdb::KeyValuePair> results;
+            std::string prefix = "fuzz_";
+            client.PrefixScan(prefix, results);
         } else {
             std::string result;
             if (client.Read(key, result)) {
@@ -200,6 +207,42 @@ int main() {
 
         std::cout << "\n--- Persistence After Chaos ---" << std::endl;
         VerifyPersistence(engine);
+
+        std::cout << "\n--- Cache Consistency Check ---" << std::endl;
+        {
+            engine.WaitForPendingFlushes();
+            std::this_thread::sleep_for(std::chrono::seconds(4));
+
+            auto iter1 = engine.RangeScan();
+            std::map<std::string, std::string> scan1;
+            while (iter1.Valid()) {
+                if (!iter1.IsTombstone())
+                    scan1[iter1.Key()] = iter1.Value();
+                iter1.Next();
+            }
+
+            auto iter2 = engine.RangeScan();
+            std::map<std::string, std::string> scan2;
+            while (iter2.Valid()) {
+                if (!iter2.IsTombstone())
+                    scan2[iter2.Key()] = iter2.Value();
+                iter2.Next();
+            }
+
+            size_t diff = 0;
+            for (const auto& [k, v] : scan1) {
+                auto it = scan2.find(k);
+                if (it == scan2.end()) diff++;
+                else if (it->second != v) diff++;
+            }
+            for (const auto& [k, v] : scan2) {
+                if (scan1.find(k) == scan1.end()) diff++;
+            }
+            std::cout << "  Scan1 entries:  " << scan1.size() << std::endl;
+            std::cout << "  Scan2 entries:  " << scan2.size() << std::endl;
+            std::cout << "  Differences:    " << diff << std::endl;
+            std::cout << (diff == 0 ? "  CACHE CONSISTENCY OK" : "  CACHE CONSISTENCY ISSUE!") << std::endl;
+        }
     }
 
     std::cout << "\n--- Restart Recovery ---" << std::endl;
