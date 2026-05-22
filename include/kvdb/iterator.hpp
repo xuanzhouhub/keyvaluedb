@@ -127,26 +127,22 @@ public:
         while (idx_ < files_.size() && !files_[idx_].max_key.empty() && files_[idx_].max_key < key)
             ++idx_;
         if (idx_ < files_.size()) {
-            if (reader_)
-                current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath,
-                    *reader_, files_[idx_].manifest_seq);
-            else
-                current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath);
-            ++idx_;
+            current_ = MakeIter(files_[idx_]); ++idx_;
             if (current_->Valid()) current_->SeekToKey(key);
             if (!current_->Valid()) OpenNext();
         }
     }
 
 private:
+    std::unique_ptr<SSTableIterator> MakeIter(const SSTable::Metadata& m) {
+        if (reader_)
+            return std::make_unique<SSTableIterator>(m.filepath, *reader_, m.manifest_seq);
+        return std::make_unique<SSTableIterator>(m.filepath);
+    }
+
     void OpenNext() {
         while (idx_ < files_.size()) {
-            if (reader_)
-                current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath,
-                    *reader_, files_[idx_].manifest_seq);
-            else
-                current_ = std::make_unique<SSTableIterator>(files_[idx_].filepath);
-            ++idx_;
+            current_ = MakeIter(files_[idx_]); ++idx_;
             if (current_->Valid()) return;
         }
         current_.reset();
