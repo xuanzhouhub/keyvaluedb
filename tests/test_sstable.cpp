@@ -1,6 +1,7 @@
 #include "test_common.hpp"
 #include "kvdb/sstable.hpp"
 #include "kvdb/block_reader.hpp"
+#include "kvdb/block_cache.hpp"
 #include "kvdb/config.hpp"
 #include "kvdb/snappy.hpp"
 #include "kvdb/bptree.hpp"
@@ -474,6 +475,13 @@ void TestCompactSplitting() {
     ASSERT_EQ(1, outputs[0].level);
 }
 
+void TestCacheHitMiss();
+void TestCacheBloomOffsets();
+void TestCacheInvalidate();
+void TestCacheEviction();
+void TestCacheZeroCopySurvival();
+void TestCacheUpdate();
+
 void RunTests() {
     std::cout << "Running SSTable Tests...\n\n";
 
@@ -497,6 +505,120 @@ void RunTests() {
     TestCompactBasic();
     TestCompactTombstoneRemoval();
     TestCompactSplitting();
+    TestCacheHitMiss();
+    TestCacheBloomOffsets();
+    TestCacheInvalidate();
+    TestCacheEviction();
+    TestCacheZeroCopySurvival();
+    TestCacheUpdate();
+}
+
+void TestCacheHitMiss() {
+    kvdb::SSTableCache cache(4, 4, 1024);
+
+    cache.PutBlock(1, 0, "hello");
+    auto sp = cache.GetBlock(1, 0);
+    ASSERT_TRUE(sp != nullptr);
+    ASSERT_TRUE(*sp == "hello");
+
+    auto miss = cache.GetBlock(1, 1);
+    ASSERT_TRUE(miss == nullptr);
+
+    miss = cache.GetBlock(2, 0);
+    ASSERT_TRUE(miss == nullptr);
+}
+
+void TestCacheBloomOffsets() {
+    kvdb::SSTableCache cache(4, 4, 4096);
+    uint64_t seq = 42;
+
+    kvdb::BloomFilter bf(100, 0.01);
+    bf.Add("foo");
+    cache.PutBloom(seq, bf);
+
+    kvdb::BloomFilter bf_out;
+    ASSERT_TRUE(cache.GetBloom(seq, bf_out));
+    ASSERT_TRUE(bf_out.BitCount() > 0);
+
+    std::vector<uint64_t> offsets = {100, 200, 300};
+    std::vector<std::string> first_keys = {"a", "m", "z"};
+    cache.PutBlockOffsets(seq, offsets, first_keys);
+
+    std::vector<uint64_t> off_out;
+    std::vector<std::string> fk_out;
+    ASSERT_TRUE(cache.GetBlockOffsets(seq, off_out, fk_out));
+    ASSERT_EQ(3u, off_out.size());
+    ASSERT_EQ("a", fk_out[0]);
+    ASSERT_EQ("z", fk_out[2]);
+}
+
+void TestCacheInvalidate() {
+    kvdb::SSTableCache cache(8, 8, 4096);
+
+    cache.PutBlock(1, 0, "a");
+    cache.PutBlock(1, 1, "b");
+    cache.PutBlock(2, 0, "c");
+
+    cache.Invalidate(1);
+
+    ASSERT_TRUE(cache.GetBlock(1, 0) == nullptr);
+    ASSERT_TRUE(cache.GetBlock(1, 1) == nullptr);
+    ASSERT_TRUE(cache.GetBlock(2, 0) != nullptr);
+    ASSERT_TRUE(*cache.GetBlock(2, 0) == "c");
+}
+
+void TestCacheEviction() {
+    kvdb::SSTableCache cache(2, 2, 256);
+
+    cache.PutBlock(1, 0, std::string(50, 'a'));
+    cache.PutBlock(2, 0, std::string(50, 'b'));
+    ASSERT_TRUE(cache.GetBlock(1, 0) != nullptr);
+    ASSERT_TRUE(cache.GetBlock(2, 0) != nullptr);
+
+    cache.PutBlock(3, 0, std::string(50, 'c'));
+    ASSERT_TRUE(cache.GetBlock(1, 0) == nullptr);
+    ASSERT_TRUE(cache.GetBlock(2, 0) != nullptr);
+    ASSERT_TRUE(cache.GetBlock(3, 0) != nullptr);
+
+    cache.PutBlock(4, 0, std::string(200, 'd'));
+    ASSERT_TRUE(cache.GetBlock(2, 0) == nullptr);
+    ASSERT_TRUE(cache.GetBlock(4, 0) != nullptr);
+}
+
+void TestCacheZeroCopySurvival() {
+    kvdb::SSTableCache cache(1, 1, 64);
+
+    cache.PutBlock(1, 0, "persistent");
+    auto sp = cache.GetBlock(1, 0);
+    ASSERT_TRUE(sp != nullptr);
+    ASSERT_TRUE(*sp == "persistent");
+
+    cache.PutBlock(2, 0, "pusher");
+
+    ASSERT_TRUE(cache.GetBlock(1, 0) == nullptr);
+
+    ASSERT_TRUE(*sp == "persistent");
+    ASSERT_EQ(10u, sp->size());
+}
+
+void TestCacheUpdate() {
+    kvdb::SSTableCache cache(4, 4, 256);
+
+    cache.PutBlock(1, 0, "old");
+    cache.PutBlock(1, 0, "new");
+
+    auto sp = cache.GetBlock(1, 0);
+    ASSERT_TRUE(sp != nullptr);
+    ASSERT_TRUE(*sp == "new");
+
+    cache.PutBloom(5, kvdb::BloomFilter(10, 0.01));
+    kvdb::BloomFilter bf(100, 0.01);
+    bf.Add("test");
+    cache.PutBloom(5, bf);
+
+    kvdb::BloomFilter bf_out;
+    ASSERT_TRUE(cache.GetBloom(5, bf_out));
+    ASSERT_TRUE(bf_out.BitCount() > 0);
 }
 
 } // namespace kvdb_test
