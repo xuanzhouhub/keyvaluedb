@@ -135,6 +135,10 @@ void SSTable::Write(const std::string& filepath, const std::vector<KeyValuePair>
     }
     if(builder.Count()>0) WriteBlock(file,builder,offsets,bloom);
     uint64_t filter_off=static_cast<uint64_t>(file.tellp());
+    // ─── CRC-COVERED REGION BEGIN ───
+    // Every byte from filter_off to meta_end is covered by MetaCRC.
+    // Add new metadata sections BETWEEN the existing lines — do NOT
+    // write anything after first_keys before MetaCRC is computed.
     file.write(min_key.data(),min_key.size()); file.write(max_key.data(),max_key.size());
     auto&bd=bloom.Data(); WriteUint32LE(file,static_cast<uint32_t>(bloom.BitCount()));
     WriteUint32LE(file,bloom.HashCount()); WriteUint32LE(file,static_cast<uint32_t>(bd.size()));
@@ -225,6 +229,7 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
     }
 
     uint64_t filter_off = static_cast<uint64_t>(file.tellp());
+    // ─── CRC-COVERED REGION BEGIN (all bytes to meta_end covered by MetaCRC) ───
     if (!min_key.empty()) file.write(min_key.data(), min_key.size());
     if (!max_key.empty()) file.write(max_key.data(), max_key.size());
     const auto& bdata = bloom.Data();
