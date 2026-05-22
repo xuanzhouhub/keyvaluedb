@@ -157,7 +157,7 @@ void LSMTreeEngine::CompactionWorkerLoop() {
     }
 }
 
-LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_bytes, size_t max_pending_flushes, size_t kv_cache_shards)
+LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_bytes, size_t max_pending_flushes, size_t kv_cache_shards, size_t block_cache_shards)
     : data_dir_(data_dir)
     , memtable_max_bytes_(memtable_max_bytes)
     , max_pending_flushes_(max_pending_flushes)
@@ -215,7 +215,11 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
     kv_cache_ = std::make_unique<KVCache>(Config::kDefaultKVMaxEntries,
                                             Config::kDefaultKVMaxBytes,
                                             kv_cache_shards);
-    sst_cache_ = std::make_unique<SSTableCache>();
+    sst_cache_ = std::make_unique<SSTableCache>(
+        Config::kDefaultBlockCacheBlocks,
+        Config::kDefaultBlockCacheMeta,
+        Config::kDefaultBlockCacheBytes,
+        block_cache_shards);
 }
 
 LSMTreeEngine::~LSMTreeEngine() {

@@ -31,7 +31,8 @@ public:
     explicit LSMTreeEngine(const std::string& data_dir = Config::kDefaultDataDir,
                            size_t memtable_max_bytes = Config::kDefaultMemTableMaxBytes,
                            size_t max_pending_flushes = Config::kDefaultMaxPendingFlushes,
-                           size_t kv_cache_shards = Config::kDefaultKVCacheShards);
+                           size_t kv_cache_shards = Config::kDefaultKVCacheShards,
+                           size_t block_cache_shards = Config::kDefaultBlockCacheShards);
 
     ~LSMTreeEngine();
 

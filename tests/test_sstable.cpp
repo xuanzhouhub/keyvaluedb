@@ -514,7 +514,7 @@ void RunTests() {
 }
 
 void TestCacheHitMiss() {
-    kvdb::SSTableCache cache(4, 4, 1024);
+    kvdb::SSTableCache cache(4, 4, 1024, 1);
 
     cache.PutBlock(1, 0, "hello");
     auto sp = cache.GetBlock(1, 0);
@@ -529,7 +529,7 @@ void TestCacheHitMiss() {
 }
 
 void TestCacheBloomOffsets() {
-    kvdb::SSTableCache cache(4, 4, 4096);
+    kvdb::SSTableCache cache(4, 4, 4096, 1);
     uint64_t seq = 42;
 
     kvdb::BloomFilter bf(100, 0.01);
@@ -553,7 +553,7 @@ void TestCacheBloomOffsets() {
 }
 
 void TestCacheInvalidate() {
-    kvdb::SSTableCache cache(8, 8, 4096);
+    kvdb::SSTableCache cache(8, 8, 4096, 1);
 
     cache.PutBlock(1, 0, "a");
     cache.PutBlock(1, 1, "b");
@@ -568,7 +568,7 @@ void TestCacheInvalidate() {
 }
 
 void TestCacheEviction() {
-    kvdb::SSTableCache cache(2, 2, 256);
+    kvdb::SSTableCache cache(2, 2, 256, 1);
 
     cache.PutBlock(1, 0, std::string(50, 'a'));
     cache.PutBlock(2, 0, std::string(50, 'b'));
@@ -586,7 +586,7 @@ void TestCacheEviction() {
 }
 
 void TestCacheZeroCopySurvival() {
-    kvdb::SSTableCache cache(1, 1, 64);
+    kvdb::SSTableCache cache(1, 1, 64, 1);
 
     cache.PutBlock(1, 0, "persistent");
     auto sp = cache.GetBlock(1, 0);
@@ -602,7 +602,7 @@ void TestCacheZeroCopySurvival() {
 }
 
 void TestCacheUpdate() {
-    kvdb::SSTableCache cache(4, 4, 256);
+    kvdb::SSTableCache cache(4, 4, 256, 1);
 
     cache.PutBlock(1, 0, "old");
     cache.PutBlock(1, 0, "new");
