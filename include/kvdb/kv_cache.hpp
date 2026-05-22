@@ -4,17 +4,20 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <list>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace kvdb {
 
 class KVCache {
 public:
     explicit KVCache(size_t max_entries = 10000,
-                     size_t max_bytes = 16 * 1024 * 1024);
+                     size_t max_bytes = 16 * 1024 * 1024,
+                     size_t num_shards = 16);
 
     KVCache(const KVCache&) = delete;
     KVCache& operator=(const KVCache&) = delete;
@@ -30,101 +33,159 @@ public:
     void Clear();
 
 private:
-    void Touch(const std::string& key);
-    void Evict();
+    struct Shard {
+        struct Entry {
+            std::string value;
+            uint64_t timestamp;
+            std::list<std::string>::iterator lru_it;
+        };
 
-    struct Entry {
-        std::string value;
-        uint64_t timestamp;
-        std::list<std::string>::iterator lru_it;
+        mutable std::mutex mutex;
+        std::unordered_map<std::string, Entry> map;
+        std::list<std::string> lru;
+        size_t max_entries;
+        size_t max_bytes;
+        size_t current_bytes = 0;
+
+        void Touch_nolock(const std::string& key);
+        void Evict_nolock();
+
+        bool Get_nolock(const std::string& key, uint64_t read_ts,
+                        std::string& value_out);
+        void Put_nolock(const std::string& key, const std::string& value,
+                        uint64_t ts);
+        void Erase_nolock(const std::string& key);
+        void Clear_nolock();
     };
 
-    mutable std::mutex mutex_;
-    std::unordered_map<std::string, Entry> map_;
-    std::list<std::string> lru_;
-    size_t max_entries_;
-    size_t max_bytes_;
-    size_t current_bytes_;
+    size_t num_shards_;
+    std::vector<Shard> shards_;
+
+    Shard& ShardForKey(const std::string& key) {
+        return shards_[std::hash<std::string>{}(key) % shards_.size()];
+    }
+
+    const Shard& ShardForKey(const std::string& key) const {
+        return shards_[std::hash<std::string>{}(key) % shards_.size()];
+    }
 };
 
-inline KVCache::KVCache(size_t max_entries, size_t max_bytes)
-    : max_entries_(max_entries), max_bytes_(max_bytes), current_bytes_(0) {}
+inline KVCache::KVCache(size_t max_entries, size_t max_bytes,
+                         size_t num_shards)
+    : num_shards_(num_shards), shards_(num_shards) {
+    size_t per_shard_entries = std::max(size_t(1), max_entries / num_shards);
+    size_t per_shard_bytes   = std::max(size_t(1), max_bytes / num_shards);
+    for (auto& s : shards_) {
+        s.max_entries = per_shard_entries;
+        s.max_bytes   = per_shard_bytes;
+    }
+}
 
 inline bool KVCache::Get(const std::string& key, uint64_t read_ts,
-                         std::string& value_out) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto it = map_.find(key);
-    if (it == map_.end()) return false;
-    if (it->second.timestamp > read_ts) return false;
-    value_out = it->second.value;
-    Touch(key);
-    return true;
+                          std::string& value_out) {
+    auto& s = ShardForKey(key);
+    std::lock_guard<std::mutex> lock(s.mutex);
+    return s.Get_nolock(key, read_ts, value_out);
 }
 
 inline void KVCache::Put(const std::string& key, const std::string& value,
-                         uint64_t ts) {
-    std::lock_guard<std::mutex> lock(mutex_);
+                          uint64_t ts) {
     if (value.size() > Config::kPageSize / 2) return;
-    auto it = map_.find(key);
-    if (it != map_.end()) {
-        current_bytes_ -= it->second.value.size();
-        it->second.value = value;
-        it->second.timestamp = ts;
-        current_bytes_ += value.size();
-        Touch(key);
-    } else {
-        while (map_.size() >= max_entries_ || current_bytes_ + value.size() > max_bytes_)
-            Evict();
-        lru_.push_front(key);
-        Entry e;
-        e.value = value;
-        e.timestamp = ts;
-        e.lru_it = lru_.begin();
-        map_[key] = std::move(e);
-        current_bytes_ += value.size();
-    }
+    auto& s = ShardForKey(key);
+    std::lock_guard<std::mutex> lock(s.mutex);
+    s.Put_nolock(key, value, ts);
 }
 
 inline void KVCache::Erase(const std::string& key) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto it = map_.find(key);
-    if (it != map_.end()) {
-        current_bytes_ -= it->second.value.size();
-        lru_.erase(it->second.lru_it);
-        map_.erase(it);
-    }
+    auto& s = ShardForKey(key);
+    std::lock_guard<std::mutex> lock(s.mutex);
+    s.Erase_nolock(key);
 }
 
 inline size_t KVCache::Size() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return map_.size();
+    size_t total = 0;
+    for (auto& s : shards_) {
+        std::lock_guard<std::mutex> lock(s.mutex);
+        total += s.map.size();
+    }
+    return total;
 }
 
 inline void KVCache::Clear() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    map_.clear();
-    lru_.clear();
-    current_bytes_ = 0;
-}
-
-inline void KVCache::Touch(const std::string& key) {
-    auto it = map_.find(key);
-    if (it != map_.end()) {
-        lru_.erase(it->second.lru_it);
-        lru_.push_front(key);
-        it->second.lru_it = lru_.begin();
+    for (auto& s : shards_) {
+        std::lock_guard<std::mutex> lock(s.mutex);
+        s.Clear_nolock();
     }
 }
 
-inline void KVCache::Evict() {
-    if (lru_.empty()) return;
-    const auto& key = lru_.back();
-    auto it = map_.find(key);
-    if (it != map_.end()) {
-        current_bytes_ -= it->second.value.size();
-        map_.erase(it);
+inline bool KVCache::Shard::Get_nolock(const std::string& key,
+                                        uint64_t read_ts,
+                                        std::string& value_out) {
+    auto it = map.find(key);
+    if (it == map.end()) return false;
+    if (it->second.timestamp > read_ts) return false;
+    value_out = it->second.value;
+    Touch_nolock(key);
+    return true;
+}
+
+inline void KVCache::Shard::Put_nolock(const std::string& key,
+                                        const std::string& value,
+                                        uint64_t ts) {
+    auto it = map.find(key);
+    if (it != map.end()) {
+        current_bytes -= it->second.value.size();
+        it->second.value = value;
+        it->second.timestamp = ts;
+        current_bytes += value.size();
+        Touch_nolock(key);
+    } else {
+        while (map.size() >= max_entries
+               || current_bytes + value.size() > max_bytes)
+            Evict_nolock();
+        lru.push_front(key);
+        Entry e;
+        e.value = value;
+        e.timestamp = ts;
+        e.lru_it = lru.begin();
+        map[key] = std::move(e);
+        current_bytes += value.size();
     }
-    lru_.pop_back();
+}
+
+inline void KVCache::Shard::Erase_nolock(const std::string& key) {
+    auto it = map.find(key);
+    if (it != map.end()) {
+        current_bytes -= it->second.value.size();
+        lru.erase(it->second.lru_it);
+        map.erase(it);
+    }
+}
+
+inline void KVCache::Shard::Clear_nolock() {
+    map.clear();
+    lru.clear();
+    current_bytes = 0;
+}
+
+inline void KVCache::Shard::Touch_nolock(const std::string& key) {
+    auto it = map.find(key);
+    if (it != map.end()) {
+        lru.erase(it->second.lru_it);
+        lru.push_front(key);
+        it->second.lru_it = lru.begin();
+    }
+}
+
+inline void KVCache::Shard::Evict_nolock() {
+    if (lru.empty()) return;
+    const auto& key = lru.back();
+    auto it = map.find(key);
+    if (it != map.end()) {
+        current_bytes -= it->second.value.size();
+        map.erase(it);
+    }
+    lru.pop_back();
 }
 
 } // namespace kvdb
