@@ -70,12 +70,21 @@ private:
     void DoFlush(std::shared_ptr<MemTable> frozen_memtable);
     void DeferRecycle(std::shared_ptr<MemTable> frozen_memtable);
     void DrainRecyclePending();
+    void DeferFileGC(const std::string& filepath, uint64_t seq,
+                     uint64_t fence_ts);
+    void DrainFileGC();
     void FlushWorkerLoop();
     void CompactionWorkerLoop();
     void CompactLevel(int from_level, int top_level);
 
     struct PendingRecycle {
         std::shared_ptr<MemTable> memtable;
+        uint64_t fence_ts;
+    };
+
+    struct PendingFileGC {
+        std::string filepath;
+        uint64_t manifest_seq;
         uint64_t fence_ts;
     };
 
@@ -107,6 +116,9 @@ private:
 
     std::vector<PendingRecycle> pending_recycle_;
     std::mutex pending_recycle_mutex_;
+
+    std::vector<PendingFileGC> pending_gc_;
+    mutable std::mutex pending_gc_mutex_;
 };
 
 } // namespace kvdb

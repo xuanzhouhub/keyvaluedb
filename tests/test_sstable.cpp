@@ -1,6 +1,5 @@
 #include "test_common.hpp"
 #include "kvdb/sstable.hpp"
-#include "kvdb/block_reader.hpp"
 #include "kvdb/config.hpp"
 #include "kvdb/snappy.hpp"
 #include "kvdb/bptree.hpp"
@@ -391,10 +390,9 @@ void TestCompactBasic() {
     std::vector<kvdb::SSTable::Metadata> inputs = {m1, m2};
     std::vector<kvdb::SSTable::Metadata> outputs;
     std::vector<std::string> garbage;
-    kvdb::NullBlockReader nbr;
 
     kvdb::SSTable::Compact(inputs, "./test_sstable_data", 100, 2,
-                           4 * 1024 * 1024, false, "", "", outputs, garbage, nbr);
+                           4 * 1024 * 1024, false, "", "", outputs, garbage);
 
     ASSERT_EQ(1u, outputs.size());
     ASSERT_EQ(2, outputs[0].level);
@@ -424,10 +422,9 @@ void TestCompactTombstoneRemoval() {
     std::vector<kvdb::SSTable::Metadata> inputs = {m};
     std::vector<kvdb::SSTable::Metadata> outputs;
     std::vector<std::string> garbage;
-    kvdb::NullBlockReader nbr;
 
     kvdb::SSTable::Compact(inputs, "./test_sstable_data", 200, 7,
-                           4 * 1024 * 1024, true, "", "", outputs, garbage, nbr);
+                           4 * 1024 * 1024, true, "", "", outputs, garbage);
 
     ASSERT_EQ(0u, outputs.size());
 }
@@ -448,10 +445,9 @@ void TestCompactSplitting() {
     std::vector<kvdb::SSTable::Metadata> inputs = {m};
     std::vector<kvdb::SSTable::Metadata> outputs;
     std::vector<std::string> garbage;
-    kvdb::NullBlockReader nbr;
 
     kvdb::SSTable::Compact(inputs, "./test_sstable_data", 300, 1,
-                           8 * 1024, false, "", "", outputs, garbage, nbr);
+                           8 * 1024, false, "", "", outputs, garbage);
 
     ASSERT_TRUE(outputs.size() > 1);
     size_t total = 0;

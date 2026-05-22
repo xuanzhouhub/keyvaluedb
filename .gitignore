@@ -1,0 +1,24 @@
+# Build artifacts
+build/
+Testing/
+*.exe
+*.ilk
+*.obj
+*.pdb
+*.lib
+*.exp
+*.suo
+
+# IDE
+.vs/
+.idea/
+*/clang/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test data
+test_eng_data/
+test_hang_data/
+test_sstable_data/

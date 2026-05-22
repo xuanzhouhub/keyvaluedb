@@ -140,7 +140,7 @@ void LSMTreeEngine::CompactionWorkerLoop() {
                 break;
             }
         }
-        if (trigger < 0) continue;
+        if (trigger < 0) { DrainFileGC(); continue; }
 
         int top = trigger;
         for (int lvl = trigger + 1; lvl <= static_cast<int>(Config::kMaxLevel); ++lvl) {
@@ -153,6 +153,7 @@ void LSMTreeEngine::CompactionWorkerLoop() {
         try {
             CompactLevel(trigger, top);
         } catch (...) {}
+        DrainFileGC();
     }
 }
 
@@ -258,6 +259,7 @@ LSMTreeEngine::~LSMTreeEngine() {
             wal_->WriteCheckpoint(global_ts_.load());
             wal_->Sync();
         }
+        DrainFileGC();
     } catch (...) {}
 }
 
@@ -601,8 +603,7 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
             if (!lower.IsUnbounded() && !meta.max_key.empty() && meta.max_key < lower.key) continue;
             if (meta.level == 0) {
                 try {
-                    auto iter = std::make_unique<SSTableIterator>(meta.filepath,
-                        *sst_cache_, meta.manifest_seq);
+                    auto iter = std::make_unique<SSTableIterator>(meta.filepath);
                     if (iter->Valid()) {
                         if (!lower.IsUnbounded()) iter->SeekToKey(lower.key);
                         if (iter->Valid()) sources.push_back(std::move(iter));
@@ -614,7 +615,7 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
         }
         for (auto& [lvl, files] : groups) {
             try {
-                auto li = std::make_unique<LevelIterator>(files, *sst_cache_);
+                auto li = std::make_unique<LevelIterator>(files);
                 if (li->Valid()) {
                     if (!lower.IsUnbounded()) li->SeekToKey(lower.key);
                     if (li->Valid()) sources.push_back(std::move(li));
@@ -710,6 +711,35 @@ void LSMTreeEngine::DrainRecyclePending() {
     }
 }
 
+void LSMTreeEngine::DeferFileGC(const std::string& filepath, uint64_t seq,
+                                uint64_t fence_ts) {
+    std::lock_guard<std::mutex> lock(pending_gc_mutex_);
+    pending_gc_.push_back({filepath, seq, fence_ts});
+}
+
+void LSMTreeEngine::DrainFileGC() {
+    std::vector<PendingFileGC> ready;
+    {
+        std::lock_guard<std::mutex> lock(pending_gc_mutex_);
+        auto& pg = pending_gc_;
+        pg.erase(
+            std::remove_if(pg.begin(), pg.end(), [&](const PendingFileGC& p) {
+                if (tracker_.MinActiveTS() >= p.fence_ts) {
+                    ready.push_back(std::move(p));
+                    return true;
+                }
+                return false;
+            }),
+            pg.end());
+    }
+
+    for (auto& entry : ready) {
+        sst_cache_->Invalidate(entry.manifest_seq);
+        std::error_code ec;
+        std::filesystem::remove(entry.filepath, ec);
+    }
+}
+
 void LSMTreeEngine::CompactLevel(int from_level, int top_level) {
     std::vector<SSTable::Metadata> snapshot;
     {
@@ -735,7 +765,7 @@ void LSMTreeEngine::CompactLevel(int from_level, int top_level) {
     std::vector<SSTable::Metadata> outputs;
     std::vector<std::string> garbage;
     SSTable::Compact(inputs, data_dir_, seq, to_level,
-                     max_sst, is_last, "", "", outputs, garbage, *sst_cache_);
+                     max_sst, is_last, "", "", outputs, garbage);
 
     {
         std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
@@ -754,11 +784,13 @@ void LSMTreeEngine::CompactLevel(int from_level, int top_level) {
         manifest_->AddSSTable(sstable_seq_.fetch_add(1), out);
     manifest_->Sync();
 
+    uint64_t gc_fence = global_ts_.load();
     for (auto& f : garbage) {
+        uint64_t gc_seq = 0;
         for (auto& in : inputs)
-            if (in.filepath == f) { sst_cache_->Invalidate(in.manifest_seq); break; }
-        std::error_code ec;
-        std::filesystem::remove(f, ec);
+            if (in.filepath == f) { gc_seq = in.manifest_seq; break; }
+        sst_cache_->Invalidate(gc_seq);
+        DeferFileGC(f, gc_seq, gc_fence);
     }
 }
 
