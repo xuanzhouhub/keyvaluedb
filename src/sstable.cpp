@@ -113,7 +113,7 @@ uint32_t ReadUint16LE(std::istream& is) {
 } // anonymous namespace
 
 void SSTable::Write(const std::string& filepath, const std::vector<KeyValuePair>& entries) {
-    std::ofstream file(filepath, std::ios::binary|std::ios::trunc);
+    std::fstream file(filepath, std::ios::binary|std::ios::trunc|std::ios::in|std::ios::out);
     if(!file.is_open()) throw std::runtime_error("SSTable open failed: "+filepath);
     BloomFilter bloom(entries.empty()?1:entries.size(), 0.01);
     std::string min_key, max_key;
@@ -142,6 +142,18 @@ void SSTable::Write(const std::string& filepath, const std::vector<KeyValuePair>
     WriteUint32LE(file,static_cast<uint32_t>(offsets.size()));
     for(auto o:offsets)WriteUint64LE(file,o);
     for(auto&fk:first_keys){uint16_t kl=static_cast<uint16_t>(fk.size());file.put(char(kl&0xFF));file.put(char((kl>>8)&0xFF));file.write(fk.data(),kl);}
+
+    uint64_t meta_end = static_cast<uint64_t>(file.tellp());
+    uint64_t meta_size = meta_end - filter_off;
+    file.seekg(static_cast<std::streamoff>(filter_off));
+    std::vector<char> meta_buf(static_cast<size_t>(meta_size));
+    file.read(meta_buf.data(), static_cast<std::streamsize>(meta_size));
+    CRC32 meta_crc;
+    meta_crc.Update(meta_buf.data(), meta_buf.size());
+    uint32_t crc_val = meta_crc.Finalize();
+    file.seekp(static_cast<std::streamoff>(meta_end));
+    WriteUint32LE(file, crc_val);
+
     WriteUint64LE(file,filter_off); WriteUint32LE(file,Config::kSSTableFooterMagic);
 }
 
@@ -191,7 +203,7 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
         BlockData bd; builder.FreezeBlock(bd.data, bloom, &bd.uncompressed); blocks.push_back(std::move(bd));
     }
 
-    std::ofstream file(filepath, std::ios::binary | std::ios::trunc);
+    std::fstream file(filepath, std::ios::binary | std::ios::trunc | std::ios::in | std::ios::out);
     WriteUint32LE(file, Config::kSSTableMagic); WriteUint32LE(file, Config::kSSTableVersion);
     WriteUint32LE(file, static_cast<uint32_t>(Config::kSSTableBlockSize));
     WriteUint32LE(file, static_cast<uint32_t>(written));
@@ -227,6 +239,18 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
         file.put(static_cast<char>(kl&0xFF)); file.put(static_cast<char>((kl>>8)&0xFF));
         file.write(fk.data(), kl);
     }
+
+    uint64_t meta_end = static_cast<uint64_t>(file.tellp());
+    uint64_t meta_size = meta_end - filter_off;
+    file.seekg(static_cast<std::streamoff>(filter_off));
+    std::vector<char> meta_buf(static_cast<size_t>(meta_size));
+    file.read(meta_buf.data(), static_cast<std::streamsize>(meta_size));
+    CRC32 meta_crc;
+    meta_crc.Update(meta_buf.data(), meta_buf.size());
+    uint32_t crc_val = meta_crc.Finalize();
+    file.seekp(static_cast<std::streamoff>(meta_end));
+    WriteUint32LE(file, crc_val);
+
     WriteUint64LE(file, filter_off); WriteUint32LE(file, Config::kSSTableFooterMagic);
 }
 
@@ -241,6 +265,7 @@ SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
     ReadUint32LE(file); meta.entry_count=ReadUint32LE(file);
     file.seekg(4,std::ios::cur);
     uint16_t minkl=static_cast<uint16_t>(ReadUint16LE(file)),maxkl=static_cast<uint16_t>(ReadUint16LE(file));
+    uint32_t version = Config::kSSTableVersion;
     meta.min_key_len=UINT32_MAX;meta.max_key_len=0; uint32_t seen=0;
     while(seen<meta.entry_count){
         uint32_t crc=ReadUint32LE(file);file.seekg(1,std::ios::cur);
@@ -254,6 +279,7 @@ SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
         for(uint32_t i=0;i<n;++i){uint32_t kl=r32();bs.seekg(kl,std::ios::cur);uint32_t vl=r32();bs.seekg(vl,std::ios::cur);for(int b=0;b<8;++b)bs.get();bs.get();if(kl<meta.min_key_len)meta.min_key_len=kl;if(kl>meta.max_key_len)meta.max_key_len=kl;}
         seen+=n;
     }
+    uint64_t meta_start = static_cast<uint64_t>(file.tellg());
     if(minkl>0){meta.min_key.resize(minkl);file.read(&meta.min_key[0],minkl);}
     if(maxkl>0){meta.max_key.resize(maxkl);file.read(&meta.max_key[0],maxkl);}
     uint32_t bb=ReadUint32LE(file),bh=ReadUint32LE(file),bz=ReadUint32LE(file);
@@ -262,6 +288,18 @@ SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
     for(uint32_t i=0;i<bc;++i)meta.block_offsets[i]=ReadUint64LE(file);
     meta.block_first_keys.resize(bc);
     for(uint32_t i=0;i<bc;++i){uint16_t kl=static_cast<uint16_t>(ReadUint16LE(file));meta.block_first_keys[i].resize(kl);if(kl>0)file.read(&meta.block_first_keys[i][0],kl);}
+    if (version >= 6) {
+        uint32_t expected_crc = ReadUint32LE(file);
+        uint64_t meta_end = static_cast<uint64_t>(file.tellg()) - 4;
+        uint64_t meta_size = meta_end - meta_start;
+        file.seekg(static_cast<std::streamoff>(meta_start));
+        std::vector<char> meta_buf(static_cast<size_t>(meta_size));
+        file.read(meta_buf.data(), static_cast<std::streamsize>(meta_size));
+        CRC32 c;
+        c.Update(meta_buf.data(), meta_buf.size());
+        if (c.Finalize() != expected_crc)
+            throw std::runtime_error("MetaCRC mismatch: " + filepath);
+    }
     file.seekg(0,std::ios::end);meta.file_size=static_cast<uint64_t>(file.tellg());
     if (cache && manifest_seq != 0) {
         cache->PutBloom(manifest_seq, meta.bloom);

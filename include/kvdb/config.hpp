@@ -9,7 +9,7 @@ namespace kvdb {
 struct Config {
     static constexpr uint32_t kSSTableMagic       = 0x4B535354;
     static constexpr uint32_t kSSTableFooterMagic = 0x4B454E44;
-    static constexpr uint32_t kSSTableVersion     = 5;
+    static constexpr uint32_t kSSTableVersion     = 6;
 
     static constexpr size_t kSSTableBlockSize     = 4096;
 
