@@ -41,6 +41,11 @@ struct Config {
     static constexpr size_t kMaxLevel = 7;
 
     static constexpr uint32_t kWALCheckpointSentinel = 0xFFFFFFFF;
+
+    static constexpr size_t kDefaultKVCacheShards     = 16;
+    static constexpr size_t kDefaultBlockCacheShards  = 16;
+    static constexpr size_t kDefaultKVMaxEntries      = 10000;
+    static constexpr size_t kDefaultKVMaxBytes        = 16 * 1024 * 1024;
 };
 
 } // namespace kvdb
