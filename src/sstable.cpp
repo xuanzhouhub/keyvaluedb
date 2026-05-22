@@ -1,4 +1,5 @@
 #include "kvdb/sstable.hpp"
+#include "kvdb/block.hpp"
 #include "kvdb/block_cache.hpp"
 #include "kvdb/config.hpp"
 #include "kvdb/internal/crc32.hpp"
@@ -296,32 +297,15 @@ bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
     auto meta=ReadMetadata(filepath, cache);
     if(meta.block_first_keys.empty())return false;
 
-    auto read_u32_ptr = [](const char* d, size_t size) -> uint32_t {
-        if (4 > size) return 0;
-        return uint8_t(d[0]) | (uint8_t(d[1])<<8)
-             | (uint8_t(d[2])<<16) | (uint8_t(d[3])<<24);
-    };
-
     auto scanBlock = [&](const char* d, size_t sz) -> bool {
-        if (sz < 4) return false;
-        size_t off = 4;
-        uint32_t n = read_u32_ptr(d, size_t(-1));
-        for (uint32_t i = 0; i < n; ++i) {
-            if (off + 4 > sz) break;
-            uint32_t kl = read_u32_ptr(d + off, sz - off); off += 4;
-            if (off + kl > sz) break;
-            std::string k(d + off, kl); off += kl;
-            if (off + 4 > sz) break;
-            uint32_t vl = read_u32_ptr(d + off, sz - off); off += 4;
-            if (off + vl > sz) break;
-            std::string v(d + off, vl); off += vl;
-            if (off + 8 + 1 > sz) break;
-            uint64_t ts = 0;
-            for (int b = 0; b < 8; ++b) ts |= uint64_t(uint8_t(d[off++])) << (b*8);
-            uint8_t fl = uint8_t(d[off++]);
-            if (k == key && ts <= read_ts) {
-                if (fl & 1) { value_out.clear(); return true; }
-                value_out = std::move(v);
+        Block blk(d, sz);
+        KeyValuePair kv;
+        for (uint32_t i = 0; i < blk.Count(); ++i) {
+            blk.Seek(i);
+            if (!blk.Read(kv)) break;
+            if (kv.key == key && kv.timestamp <= read_ts) {
+                if (kv.is_tombstone) { value_out.clear(); return true; }
+                value_out = std::move(kv.value);
                 return true;
             }
         }
