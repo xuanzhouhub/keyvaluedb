@@ -20,6 +20,7 @@ add_library(kvdb_lib STATIC
     src/protocol.cpp
     src/server.cpp
     src/client.cpp
+    src/iterator.cpp
 )
 
 target_include_directories(kvdb_lib PUBLIC
