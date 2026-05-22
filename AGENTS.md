@@ -12,6 +12,7 @@
 - All code must be in C++17, built with CMake.
 - You are responsible for documentation and comprehensive testing.
 - After making changes, always build and run tests to verify.
+- **CRC COVERAGE RULE**: Every byte written to an SSTable file MUST be covered by a CRC. If you add a new metadata section to the SSTable format, place it inside the `CRC-COVERED REGION` markers in `src/sstable.cpp` (between `filter_off` and `meta_end`). If you add a new data section, give it a per-section CRC. Add `docs/design.md` CRC coverage table entry. Write a test that corrupts the new section and verifies the CRC catches it.
 
 ## User Instructions
 
