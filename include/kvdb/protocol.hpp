@@ -21,6 +21,9 @@ struct Protocol {
     static const uint8_t kDeleteReq     = 'D';
     static const uint8_t kRangeScanReq  = 'S';
     static const uint8_t kPrefixScanReq = 'P';
+    static const uint8_t kBatchBeginReq = 'B';
+    static const uint8_t kBatchWriteReq = 'b';
+    static const uint8_t kBatchCommitReq = 'C';
     static const uint8_t kOkResp        = 'O';
     static const uint8_t kValueResp     = 'V';
     static const uint8_t kNotFoundResp  = 'N';

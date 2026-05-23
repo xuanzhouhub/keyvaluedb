@@ -28,6 +28,11 @@ public:
     bool PrefixScan(const std::string& prefix,
                     std::vector<KeyValuePair>& results);
 
+    bool StartBatch();
+    bool BatchPut(const std::string& key, const std::string& value);
+    bool BatchDelete(const std::string& key);
+    bool CommitBatch();
+
 private:
     socket_t sock_ = kInvalidSocket;
 };

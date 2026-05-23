@@ -203,6 +203,7 @@ void Server::HandleClient(socket_t client_sock) {
             WriteRequest req;
             req.key = std::move(key);
             req.value.clear();
+            req.is_delete = true;
             req.client_sock = client_sock;
             auto future = req.promise.get_future();
 
@@ -222,6 +223,50 @@ void Server::HandleClient(socket_t client_sock) {
             unsigned char resp = result ? Protocol::kOkResp : Protocol::kErrorResp;
             SendAll(client_sock, &resp, 1);
             if (!result) SendString(client_sock, "delete failed");
+
+        } else if (req_type == Protocol::kBatchWriteReq) {
+            if (!RecvUint32(client_sock, key_len)) break;
+            key.resize(key_len);
+            if (!RecvAll(client_sock, &key[0], key_len)) break;
+
+            if (!RecvUint32(client_sock, value_len)) break;
+            value.resize(value_len);
+            if (!RecvAll(client_sock, &value[0], value_len)) break;
+
+            bool is_delete = value.empty();
+
+            WriteRequest req;
+            req.key = std::move(key);
+            req.value = std::move(value);
+            req.is_delete = is_delete;
+            req.client_sock = client_sock;
+            auto future = req.promise.get_future();
+
+            {
+                std::unique_lock<std::mutex> lock(write_queue_mutex_);
+                size_t req_size = req.key.size() + req.value.size() + 64;
+                write_queue_not_full_cv_.wait(lock, [this, req_size] {
+                    return batch_queue_bytes_ + req_size <= max_queue_bytes_
+                        || should_stop_.load();
+                });
+                if (should_stop_.load()) break;
+                batch_queue_bytes_ += req_size;
+                batch_queue_.push(std::move(req));
+            }
+            write_queue_cv_.notify_one();
+
+            bool result = future.get();
+            unsigned char resp = result ? Protocol::kOkResp : Protocol::kErrorResp;
+            SendAll(client_sock, &resp, 1);
+            if (!result) SendString(client_sock, "batch write failed");
+
+        } else if (req_type == Protocol::kBatchBeginReq) {
+            unsigned char resp = Protocol::kOkResp;
+            SendAll(client_sock, &resp, 1);
+
+        } else if (req_type == Protocol::kBatchCommitReq) {
+            unsigned char resp = Protocol::kOkResp;
+            SendAll(client_sock, &resp, 1);
 
         } else if (req_type == Protocol::kRangeScanReq) {
             RangeBound lower, upper;
@@ -266,25 +311,37 @@ void Server::HandleClient(socket_t client_sock) {
 void Server::WriterLoop() {
     while (true) {
         WriteRequest req;
+        bool from_batch = false;
         {
             std::unique_lock<std::mutex> lock(write_queue_mutex_);
             write_queue_cv_.wait(lock, [this] {
-                return !write_queue_.empty() || should_stop_.load();
+                return !write_queue_.empty() || !batch_queue_.empty() || should_stop_.load();
             });
 
-            if (should_stop_.load() && write_queue_.empty()) {
+            if (should_stop_.load() && write_queue_.empty() && batch_queue_.empty()) {
                 break;
             }
 
-            req = std::move(write_queue_.front());
-            write_queue_.pop();
-            queue_bytes_ -= (req.key.size() + req.value.size());
+            if (!write_queue_.empty()) {
+                req = std::move(write_queue_.front());
+                write_queue_.pop();
+                queue_bytes_ -= (req.key.size() + req.value.size());
+            } else if (!batch_queue_.empty()) {
+                req = std::move(batch_queue_.front());
+                batch_queue_.pop();
+                from_batch = true;
+                batch_queue_bytes_ -= (req.key.size() + req.value.size());
+            }
         }
 
         write_queue_not_full_cv_.notify_one();
 
         try {
-            engine_.Insert(req.key, req.value);
+            if (req.is_delete) {
+                engine_.Delete(req.key);
+            } else {
+                engine_.Insert(req.key, req.value);
+            }
             req.promise.set_value(true);
         } catch (const std::exception&) {
             req.promise.set_value(false);

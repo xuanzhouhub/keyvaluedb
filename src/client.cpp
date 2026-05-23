@@ -173,4 +173,36 @@ bool Client::PrefixScan(const std::string& prefix,
     }
 }
 
+bool Client::StartBatch() {
+    if (sock_ == kInvalidSocket) return false;
+    unsigned char req = Protocol::kBatchBeginReq;
+    if (!SendAll(sock_, &req, 1)) return false;
+    unsigned char resp;
+    return RecvAll(sock_, &resp, 1) && resp == Protocol::kOkResp;
+}
+
+bool Client::BatchPut(const std::string& key, const std::string& value) {
+    if (sock_ == kInvalidSocket) return false;
+    unsigned char req = Protocol::kBatchWriteReq;
+    if (!SendAll(sock_, &req, 1)) return false;
+    if (!SendString(sock_, key)) return false;
+    if (!SendString(sock_, value)) return false;
+
+    unsigned char resp;
+    if (!RecvAll(sock_, &resp, 1)) return false;
+    return resp == Protocol::kOkResp;
+}
+
+bool Client::BatchDelete(const std::string& key) {
+    return BatchPut(key, "");
+}
+
+bool Client::CommitBatch() {
+    if (sock_ == kInvalidSocket) return false;
+    unsigned char req = Protocol::kBatchCommitReq;
+    if (!SendAll(sock_, &req, 1)) return false;
+    unsigned char resp;
+    return RecvAll(sock_, &resp, 1) && resp == Protocol::kOkResp;
+}
+
 } // namespace kvdb

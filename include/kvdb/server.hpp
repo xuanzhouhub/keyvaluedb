@@ -50,14 +50,17 @@ private:
         std::string value;
         std::promise<bool> promise;
         socket_t client_sock;
+        bool is_delete = false;
     };
 
     std::queue<WriteRequest> write_queue_;
+    std::queue<WriteRequest> batch_queue_;
     std::mutex write_queue_mutex_;
     std::condition_variable write_queue_cv_;
     std::condition_variable write_queue_not_full_cv_;
     size_t max_queue_bytes_ = Config::kMaxWriteQueueBytes;
     size_t queue_bytes_ = 0;
+    size_t batch_queue_bytes_ = 0;
 
     std::atomic<bool> running_{false};
     std::atomic<bool> should_stop_{false};
