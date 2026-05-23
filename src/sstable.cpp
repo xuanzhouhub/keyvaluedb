@@ -445,7 +445,7 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
 
     if (sources.empty()) return;
 
-    auto nextKey = [&]() -> KeyValuePair {
+    auto nextKey = [&]() -> std::vector<KeyValuePair> {
         while (true) {
             int best = -1;
             for (size_t i = 0; i < sources.size(); ++i) {
@@ -453,24 +453,50 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
                 if (best < 0 || sources[i].Current().key < sources[best].Current().key)
                     best = static_cast<int>(i);
             }
-            if (best < 0) return {"", "", 0, false};
+            if (best < 0) return {};
 
             std::string key = sources[best].Current().key;
-            KeyValuePair winner = sources[best].Current();
-            sources[best].Next();
+
+            KeyValuePair vis_winner;
+            bool vis_winner_set = false;
+            std::vector<KeyValuePair> future;
 
             for (size_t i = 0; i < sources.size(); ++i) {
                 while (sources[i].Valid() && sources[i].Current().key == key) {
-                    if (sources[i].Current().timestamp > winner.timestamp)
-                        winner = sources[i].Current();
+                    auto& cur = sources[i].Current();
+                    if (cur.timestamp <= visible_ts) {
+                        if (!vis_winner_set || cur.timestamp > vis_winner.timestamp)
+                            vis_winner = cur;
+                        vis_winner_set = true;
+                    } else {
+                        future.push_back(cur);
+                    }
                     sources[i].Next();
                 }
             }
-            if (winner.timestamp > visible_ts) continue;
-            if (winner.is_tombstone && is_last_level) continue;
-            if (!range_lower.empty() && winner.key < range_lower) continue;
-            if (!range_upper.empty() && winner.key > range_upper) return {};
-            return winner;
+
+            for (auto& fut : future) {
+                if (fut.is_tombstone && is_last_level) continue;
+                if (!range_lower.empty() && fut.key < range_lower) continue;
+                if (!range_upper.empty() && fut.key > range_upper) continue;
+            }
+
+            std::vector<KeyValuePair> result;
+
+            if (vis_winner_set) {
+                if (!(vis_winner.is_tombstone && is_last_level)
+                    && (range_lower.empty() || vis_winner.key >= range_lower)
+                    && (range_upper.empty() || vis_winner.key <= range_upper)) {
+                    result.push_back(std::move(vis_winner));
+                }
+            }
+
+            if (vis_winner_set || !future.empty()) {
+                for (auto& fut : future) {
+                    result.push_back(std::move(fut));
+                }
+                return result;
+            }
         }
     };
 
@@ -479,24 +505,26 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
     size_t approx = 0;
 
     for (;;) {
-        KeyValuePair kv = nextKey();
-        if (kv.key.empty()) break;
+        auto kvs = nextKey();
+        if (kvs.empty()) break;
 
-        size_t es = kv.key.size() + kv.value.size() + 24;
-        if (!batch.empty() && approx + es > max_sstable_size) {
-            std::ostringstream oss;
-            oss << output_dir << "/sstable_" << seq++ << ".sst";
-            std::string fpath = oss.str();
-            SSTable::Write(fpath, batch);
-            Metadata meta = ReadMetadata(fpath);
-            meta.filepath = fpath;
-            meta.level = output_level;
-            outputs.push_back(std::move(meta));
-            batch.clear();
-            approx = 0;
+        for (auto& kv : kvs) {
+            size_t es = kv.key.size() + kv.value.size() + 24;
+            if (!batch.empty() && approx + es > max_sstable_size) {
+                std::ostringstream oss;
+                oss << output_dir << "/sstable_" << seq++ << ".sst";
+                std::string fpath = oss.str();
+                SSTable::Write(fpath, batch);
+                Metadata meta = ReadMetadata(fpath);
+                meta.filepath = fpath;
+                meta.level = output_level;
+                outputs.push_back(std::move(meta));
+                batch.clear();
+                approx = 0;
+            }
+            batch.push_back(std::move(kv));
+            approx += es;
         }
-        batch.push_back(std::move(kv));
-        approx += es;
     }
 
     if (!batch.empty()) {
