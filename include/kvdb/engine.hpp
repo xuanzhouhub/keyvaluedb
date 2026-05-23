@@ -32,7 +32,8 @@ public:
                            size_t memtable_max_bytes = Config::kDefaultMemTableMaxBytes,
                            size_t max_pending_flushes = Config::kDefaultMaxPendingFlushes,
                            size_t kv_cache_shards = Config::kDefaultKVCacheShards,
-                           size_t block_cache_shards = Config::kDefaultBlockCacheShards);
+                           size_t block_cache_shards = Config::kDefaultBlockCacheShards,
+                           uint64_t batch_increment_gap = Config::kDefaultBatchIncrementGap);
 
     ~LSMTreeEngine();
 
@@ -41,6 +42,12 @@ public:
 
     void Insert(const std::string& key, const std::string& value);
     void Delete(const std::string& key);
+
+    bool StartBatch();
+    bool CommitBatch();
+    void BatchInsert(const std::string& key, const std::string& value);
+    void BatchDelete(const std::string& key);
+    uint64_t BatchGap() const { return batch_increment_gap_; }
 
     bool Lookup(const std::string& key, std::string& value_out) const;
 
@@ -104,6 +111,12 @@ private:
 
     std::atomic<uint64_t> sstable_seq_{0};
     std::atomic<uint64_t> global_ts_{0};
+
+    std::mutex batch_mutex_;
+    std::condition_variable batch_cv_;
+    uint64_t batch_increment_gap_ = Config::kDefaultBatchIncrementGap;
+    bool batch_in_progress_ = false;
+    uint64_t batch_ts_ = 0;
 
     std::unique_ptr<WAL> wal_;
     std::unique_ptr<Manifest> manifest_;

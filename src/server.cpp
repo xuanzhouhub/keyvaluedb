@@ -261,12 +261,16 @@ void Server::HandleClient(socket_t client_sock) {
             if (!result) SendString(client_sock, "batch write failed");
 
         } else if (req_type == Protocol::kBatchBeginReq) {
-            unsigned char resp = Protocol::kOkResp;
+            bool started = engine_.StartBatch();
+            unsigned char resp = started ? Protocol::kOkResp : Protocol::kErrorResp;
             SendAll(client_sock, &resp, 1);
+            if (!started) SendString(client_sock, "batch already in progress");
 
         } else if (req_type == Protocol::kBatchCommitReq) {
-            unsigned char resp = Protocol::kOkResp;
+            bool committed = engine_.CommitBatch();
+            unsigned char resp = committed ? Protocol::kOkResp : Protocol::kErrorResp;
             SendAll(client_sock, &resp, 1);
+            if (!committed) SendString(client_sock, "no batch in progress");
 
         } else if (req_type == Protocol::kRangeScanReq) {
             RangeBound lower, upper;
@@ -337,10 +341,12 @@ void Server::WriterLoop() {
         write_queue_not_full_cv_.notify_one();
 
         try {
-            if (req.is_delete) {
-                engine_.Delete(req.key);
+            if (from_batch) {
+                if (req.is_delete) engine_.BatchDelete(req.key);
+                else engine_.BatchInsert(req.key, req.value);
             } else {
-                engine_.Insert(req.key, req.value);
+                if (req.is_delete) engine_.Delete(req.key);
+                else engine_.Insert(req.key, req.value);
             }
             req.promise.set_value(true);
         } catch (const std::exception&) {

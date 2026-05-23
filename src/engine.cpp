@@ -157,10 +157,11 @@ void LSMTreeEngine::CompactionWorkerLoop() {
     }
 }
 
-LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_bytes, size_t max_pending_flushes, size_t kv_cache_shards, size_t block_cache_shards)
+LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_bytes, size_t max_pending_flushes, size_t kv_cache_shards, size_t block_cache_shards, uint64_t batch_increment_gap)
     : data_dir_(data_dir)
     , memtable_max_bytes_(memtable_max_bytes)
     , max_pending_flushes_(max_pending_flushes)
+    , batch_increment_gap_(batch_increment_gap)
     , active_memtable_(std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes)) {
     EnsureDataDirectoryExists();
 
@@ -320,7 +321,13 @@ void LSMTreeEngine::Insert(const std::string& key, const std::string& value) {
             + std::to_string(Config::kMaxKeyValuePairBytes) + " bytes)");
     }
 
-    uint64_t ts = global_ts_.fetch_add(1) + 1;
+    uint64_t ts;
+    {
+        std::unique_lock<std::mutex> lock(batch_mutex_);
+        while (batch_in_progress_ && global_ts_.load() + 1 > batch_ts_)
+            batch_cv_.wait(lock);
+        ts = global_ts_.fetch_add(1) + 1;
+    }
 
     wal_->Buffer(key, value, ts);
     size_t my_seq = wal_->CurrentBatchSeq();
@@ -368,7 +375,13 @@ void LSMTreeEngine::Delete(const std::string& key) {
             + std::to_string(Config::kMaxKeyBytes) + " bytes)");
     }
 
-    uint64_t ts = global_ts_.fetch_add(1) + 1;
+    uint64_t ts;
+    {
+        std::unique_lock<std::mutex> lock(batch_mutex_);
+        while (batch_in_progress_ && global_ts_.load() + 1 > batch_ts_)
+            batch_cv_.wait(lock);
+        ts = global_ts_.fetch_add(1) + 1;
+    }
 
     wal_->Buffer(key, "", ts);
     size_t my_seq = wal_->CurrentBatchSeq();
@@ -798,6 +811,69 @@ void LSMTreeEngine::CompactLevel(int from_level, int top_level) {
             if (in.filepath == f) { gc_seq = in.manifest_seq; break; }
         sst_cache_->Invalidate(gc_seq);
         DeferFileGC(f, gc_seq, gc_fence);
+    }
+}
+
+bool LSMTreeEngine::StartBatch() {
+    std::lock_guard<std::mutex> lock(batch_mutex_);
+    if (batch_in_progress_) return false;
+    batch_ts_ = global_ts_.load() + batch_increment_gap_;
+    batch_in_progress_ = true;
+    return true;
+}
+
+bool LSMTreeEngine::CommitBatch() {
+    std::unique_lock<std::mutex> lock(batch_mutex_);
+    if (!batch_in_progress_) return false;
+    global_ts_.store(batch_ts_ + 1);
+    batch_in_progress_ = false;
+    lock.unlock();
+    batch_cv_.notify_all();
+    return true;
+}
+
+void LSMTreeEngine::BatchInsert(const std::string& key, const std::string& value) {
+    if (key.size() > Config::kMaxKeyBytes)
+        throw std::invalid_argument("Key too large for batch");
+    size_t entry_size = key.size() + value.size() + Config::kMemTableEntryOverheadBytes;
+    if (entry_size > Config::kMaxKeyValuePairBytes)
+        throw std::invalid_argument("KV pair too large for batch");
+
+    {
+        std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
+        active_memtable_->Insert(key, value, batch_ts_, false);
+        if (active_memtable_->IsFull()) {
+            auto frozen = active_memtable_;
+            frozen->Freeze();
+            frozen_memtables_.push_back(frozen);
+            {
+                std::lock_guard<std::mutex> lk(flush_->mtx);
+                flush_->pending++;
+            }
+            flush_->cv.notify_one();
+            active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_);
+        }
+    }
+}
+
+void LSMTreeEngine::BatchDelete(const std::string& key) {
+    if (key.size() > Config::kMaxKeyBytes)
+        throw std::invalid_argument("Key too large for batch");
+
+    {
+        std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
+        active_memtable_->Insert(key, "", batch_ts_, true);
+        if (active_memtable_->IsFull()) {
+            auto frozen = active_memtable_;
+            frozen->Freeze();
+            frozen_memtables_.push_back(frozen);
+            {
+                std::lock_guard<std::mutex> lk(flush_->mtx);
+                flush_->pending++;
+            }
+            flush_->cv.notify_one();
+            active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_);
+        }
     }
 }
 
