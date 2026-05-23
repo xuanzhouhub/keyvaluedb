@@ -412,7 +412,8 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
                       const std::string& range_upper,
                       std::vector<Metadata>& outputs,
                       std::vector<std::string>& garbage_files,
-                      BlockReader& cache) {
+                      BlockReader& cache,
+                      uint64_t visible_ts) {
     struct MergeSrc {
         std::unique_ptr<SourceIterator> iter;
         KeyValuePair cur;
@@ -465,6 +466,7 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
                     sources[i].Next();
                 }
             }
+            if (winner.timestamp > visible_ts) continue;
             if (winner.is_tombstone && is_last_level) continue;
             if (!range_lower.empty() && winner.key < range_lower) continue;
             if (!range_upper.empty() && winner.key > range_upper) return {};

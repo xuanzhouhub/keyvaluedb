@@ -55,7 +55,8 @@ public:
                         const std::string& range_upper,
                         std::vector<Metadata>& outputs,
                         std::vector<std::string>& garbage_files,
-                        BlockReader& cache);
+                        BlockReader& cache,
+                        uint64_t visible_ts = UINT64_MAX);
 
     static void WriteUint32LE(std::ostream& os, uint32_t value);
     static void WriteUint32LE(std::vector<char>& buf, uint32_t value);

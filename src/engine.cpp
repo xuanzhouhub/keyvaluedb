@@ -785,7 +785,8 @@ void LSMTreeEngine::CompactLevel(int from_level, int top_level) {
     std::vector<SSTable::Metadata> outputs;
     std::vector<std::string> garbage;
     SSTable::Compact(inputs, data_dir_, seq, to_level,
-                     max_sst, is_last, "", "", outputs, garbage, *sst_cache_);
+                     max_sst, is_last, "", "", outputs, garbage, *sst_cache_,
+                     global_ts_.load());
 
     {
         std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
