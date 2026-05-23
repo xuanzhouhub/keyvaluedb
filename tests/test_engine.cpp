@@ -709,6 +709,101 @@ void TestCompactionCacheReadIntegrity() {
     CleanupTestDir();
 }
 
+void TestBatchInvisibleDuring() {
+    std::filesystem::remove_all("./test_batch_data1");
+    {
+        kvdb::LSMTreeEngine engine("./test_batch_data1", 4096, 2, 16, 16, 1000);
+        ASSERT_TRUE(engine.StartBatch());
+        engine.BatchInsert("b1", "v1");
+        engine.BatchInsert("b2", "v2");
+        engine.BatchDelete("bd");
+
+        std::string v;
+        ASSERT_FALSE(engine.Lookup("b1", v));
+        ASSERT_FALSE(engine.Lookup("b2", v));
+        ASSERT_FALSE(engine.Lookup("bd", v));
+
+        ASSERT_TRUE(engine.CommitBatch());
+
+        ASSERT_TRUE(engine.Lookup("b1", v));
+        ASSERT_STREQ("v1", v);
+        ASSERT_TRUE(engine.Lookup("b2", v));
+        ASSERT_STREQ("v2", v);
+        ASSERT_FALSE(engine.Lookup("bd", v));
+    }
+    std::filesystem::remove_all("./test_batch_data1");
+}
+
+void TestBatchSingleAtATime() {
+    std::filesystem::remove_all("./test_batch_data2");
+    {
+        kvdb::LSMTreeEngine engine("./test_batch_data2", 4096, 2, 16, 16, 1000);
+        ASSERT_TRUE(engine.StartBatch());
+        ASSERT_FALSE(engine.StartBatch());
+        ASSERT_TRUE(engine.CommitBatch());
+        ASSERT_TRUE(engine.StartBatch());
+        engine.BatchInsert("x", "y");
+        ASSERT_TRUE(engine.CommitBatch());
+    }
+    std::filesystem::remove_all("./test_batch_data2");
+}
+
+void TestBatchNormalWritesDuring() {
+    std::filesystem::remove_all("./test_batch_data3");
+    {
+        kvdb::LSMTreeEngine engine("./test_batch_data3", 4096, 2, 16, 16, 100);
+        ASSERT_TRUE(engine.StartBatch());
+        engine.BatchInsert("bx", "bv");
+
+        engine.Insert("nx", "nv");
+
+        std::string v;
+        ASSERT_FALSE(engine.Lookup("bx", v));
+        ASSERT_TRUE(engine.Lookup("nx", v));
+        ASSERT_STREQ("nv", v);
+
+        ASSERT_TRUE(engine.CommitBatch());
+
+        ASSERT_TRUE(engine.Lookup("bx", v));
+        ASSERT_STREQ("bv", v);
+        ASSERT_TRUE(engine.Lookup("nx", v));
+        ASSERT_STREQ("nv", v);
+    }
+    std::filesystem::remove_all("./test_batch_data3");
+}
+
+void TestBatchGapExhausted() {
+    std::filesystem::remove_all("./test_batch_data4");
+    {
+        kvdb::LSMTreeEngine engine("./test_batch_data4", 4*1024*1024, 2, 16, 16, 5);
+        ASSERT_TRUE(engine.StartBatch());
+        engine.BatchInsert("b", "v");
+
+        for (int i = 0; i < 5; ++i)
+            engine.Insert("n" + std::to_string(i), "v");
+
+        std::atomic<bool> started{false}, done{false};
+        std::thread t([&]() {
+            started = true;
+            engine.Insert("n_blocked", "v");
+            done = true;
+        });
+
+        while (!started) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        ASSERT_FALSE(done.load());
+
+        ASSERT_TRUE(engine.CommitBatch());
+        t.join();
+        ASSERT_TRUE(done.load());
+
+        std::string v2;
+        ASSERT_TRUE(engine.Lookup("n_blocked", v2));
+        ASSERT_STREQ("v", v2);
+    }
+    std::filesystem::remove_all("./test_batch_data4");
+}
+
 void RunTests() {
     std::cout << "Running LSMTreeEngine Tests...\n\n";
 
@@ -745,6 +840,10 @@ void RunTests() {
     TestKVCacheTombstone();
     TestRangeScanCachedBlocks();
     TestCompactionCacheReadIntegrity();
+    TestBatchInvisibleDuring();
+    TestBatchSingleAtATime();
+    TestBatchNormalWritesDuring();
+    TestBatchGapExhausted();
 }
 
 } // namespace kvdb_test
