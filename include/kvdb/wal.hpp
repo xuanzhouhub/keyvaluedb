@@ -25,6 +25,8 @@ public:
 
     void Buffer(const std::string& key, const std::string& value, uint64_t timestamp = 0);
 
+    void BufferBatchBegin(uint64_t batch_ts);
+    void BufferBatchCommit(uint64_t batch_ts);
     void BufferAbort(uint64_t batch_ts);
 
     void WriteCheckpoint(uint64_t timestamp);

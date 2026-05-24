@@ -828,12 +828,18 @@ bool LSMTreeEngine::StartBatch() {
     batch_ts_ = global_ts_.load() + batch_increment_gap_;
     batch_in_progress_ = true;
     batch_touched_ = false;
+
+    wal_->BufferBatchBegin(batch_ts_);
+
     return true;
 }
 
 bool LSMTreeEngine::CommitBatch() {
     std::unique_lock<std::mutex> lock(batch_mutex_);
     if (!batch_in_progress_) return false;
+
+    wal_->BufferBatchCommit(batch_ts_);
+
     global_ts_.store(batch_ts_ + 1);
     batch_in_progress_ = false;
     lock.unlock();

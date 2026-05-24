@@ -3,6 +3,7 @@
 
 #include <cstring>
 #include <stdexcept>
+#include <unordered_set>
 
 #ifdef _WIN32
 #include <io.h>
@@ -29,6 +30,18 @@ void WriteUint32LE(std::vector<char>& buf, uint32_t v) {
     buf.push_back(static_cast<char>((v >> 8) & 0xFF));
     buf.push_back(static_cast<char>((v >> 16) & 0xFF));
     buf.push_back(static_cast<char>((v >> 24) & 0xFF));
+}
+
+void WriteSentinelRecord(uint32_t sentinel, uint64_t ts, std::vector<char>& buf_out) {
+    CRC32 crc;
+    std::vector<char> body;
+    WriteUint32LE(body, sentinel);
+    for (int i = 0; i < 8; ++i)
+        body.push_back(static_cast<char>((ts >> (i * 8)) & 0xFF));
+    crc.Update(body.data(), body.size());
+    uint32_t crc_val = crc.Finalize();
+    WriteUint32LE(buf_out, crc_val);
+    buf_out.insert(buf_out.end(), body.begin(), body.end());
 }
 
 } // anonymous namespace
@@ -88,25 +101,17 @@ void WAL::Buffer(const std::string& key, const std::string& value, uint64_t time
 
 void WAL::BufferAbort(uint64_t batch_ts) {
     std::lock_guard<std::mutex> lock(mutex_);
-    static constexpr uint32_t kAbortSentinel = 0xFFFFFFFE;
-    std::vector<char> body;
-    WriteUint32LE(body, kAbortSentinel);
-    uint64_t ts = batch_ts;
-    body.push_back(static_cast<char>(ts & 0xFF));
-    body.push_back(static_cast<char>((ts >> 8) & 0xFF));
-    body.push_back(static_cast<char>((ts >> 16) & 0xFF));
-    body.push_back(static_cast<char>((ts >> 24) & 0xFF));
-    body.push_back(static_cast<char>((ts >> 32) & 0xFF));
-    body.push_back(static_cast<char>((ts >> 40) & 0xFF));
-    body.push_back(static_cast<char>((ts >> 48) & 0xFF));
-    body.push_back(static_cast<char>((ts >> 56) & 0xFF));
-    CRC32 crc;
-    crc.Update(body.data(), body.size());
-    uint32_t crc_val = crc.Finalize();
-    std::vector<char> entry;
-    WriteUint32LE(entry, crc_val);
-    entry.insert(entry.end(), body.begin(), body.end());
-    write_buf_.insert(write_buf_.end(), entry.begin(), entry.end());
+    WriteSentinelRecord(0xFFFFFFFE, batch_ts, write_buf_);
+}
+
+void WAL::BufferBatchBegin(uint64_t batch_ts) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    WriteSentinelRecord(0xFFFFFFFA, batch_ts, write_buf_);
+}
+
+void WAL::BufferBatchCommit(uint64_t batch_ts) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    WriteSentinelRecord(0xFFFFFFFC, batch_ts, write_buf_);
 }
 
 void WAL::WriteCheckpoint(uint64_t timestamp) {
@@ -272,8 +277,15 @@ std::vector<KeyValuePair> WAL::Recover(uint64_t* checkpoint_ts,
     }
 
     std::vector<KeyValuePair> results;
+    std::unordered_set<uint64_t> batch_opened, batch_closed;
 
     pos = static_cast<size_t>(last_checkpoint_end);
+    auto ReadUint64From = [](const unsigned char* d) -> uint64_t {
+        return static_cast<uint64_t>(d[0]) | (static_cast<uint64_t>(d[1]) << 8)
+             | (static_cast<uint64_t>(d[2]) << 16) | (static_cast<uint64_t>(d[3]) << 24)
+             | (static_cast<uint64_t>(d[4]) << 32) | (static_cast<uint64_t>(d[5]) << 40)
+             | (static_cast<uint64_t>(d[6]) << 48) | (static_cast<uint64_t>(d[7]) << 56);
+    };
     while (pos + 4 <= file_data.size()) {
         size_t record_start = pos;
 
@@ -292,18 +304,29 @@ std::vector<KeyValuePair> WAL::Recover(uint64_t* checkpoint_ts,
             continue;
         }
 
+        if (key_len == 0xFFFFFFFA) {
+            if (pos + 8 > file_data.size()) break;
+            uint64_t bts = ReadUint64From(p + pos);
+            pos += 8;
+            batch_opened.insert(bts);
+            continue;
+        }
+
+        if (key_len == 0xFFFFFFFC) {
+            if (pos + 8 > file_data.size()) break;
+            uint64_t bts = ReadUint64From(p + pos);
+            pos += 8;
+            batch_opened.erase(bts);
+            batch_closed.insert(bts);
+            continue;
+        }
+
         if (key_len == 0xFFFFFFFE) {
             if (pos + 8 > file_data.size()) break;
-            uint64_t aborted_ts =
-                static_cast<uint64_t>(p[pos])
-                | (static_cast<uint64_t>(p[pos + 1]) << 8)
-                | (static_cast<uint64_t>(p[pos + 2]) << 16)
-                | (static_cast<uint64_t>(p[pos + 3]) << 24)
-                | (static_cast<uint64_t>(p[pos + 4]) << 32)
-                | (static_cast<uint64_t>(p[pos + 5]) << 40)
-                | (static_cast<uint64_t>(p[pos + 6]) << 48)
-                | (static_cast<uint64_t>(p[pos + 7]) << 56);
+            uint64_t aborted_ts = ReadUint64From(p + pos);
             pos += 8;
+            batch_opened.erase(aborted_ts);
+            batch_closed.insert(aborted_ts);
             if (aborted) aborted->push_back(aborted_ts);
             continue;
         }
@@ -345,6 +368,11 @@ std::vector<KeyValuePair> WAL::Recover(uint64_t* checkpoint_ts,
         }
 
         results.push_back({std::move(key), std::move(value), timestamp});
+    }
+
+    for (uint64_t ts : batch_opened) {
+        if (!batch_closed.count(ts) && aborted)
+            aborted->push_back(ts);
     }
 
     if (checkpoint_ts) *checkpoint_ts = found_ts;
