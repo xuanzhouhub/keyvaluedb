@@ -277,7 +277,7 @@ std::vector<KeyValuePair> WAL::Recover(uint64_t* checkpoint_ts,
     }
 
     std::vector<KeyValuePair> results;
-    std::unordered_set<uint64_t> batch_opened, batch_closed;
+    std::unordered_set<uint64_t> batch_opened, batch_closed, batch_has_entries;
 
     pos = static_cast<size_t>(last_checkpoint_end);
     auto ReadUint64From = [](const unsigned char* d) -> uint64_t {
@@ -368,10 +368,11 @@ std::vector<KeyValuePair> WAL::Recover(uint64_t* checkpoint_ts,
         }
 
         results.push_back({std::move(key), std::move(value), timestamp});
+        batch_has_entries.insert(timestamp);
     }
 
     for (uint64_t ts : batch_opened) {
-        if (!batch_closed.count(ts) && aborted)
+        if (!batch_closed.count(ts) && batch_has_entries.count(ts) && aborted)
             aborted->push_back(ts);
     }
 
