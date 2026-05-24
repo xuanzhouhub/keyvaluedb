@@ -256,11 +256,22 @@ Compaction:
   - Output metadata inherits union (NOT at bottom level)
   - At bottom level: marks dropped — all batch entries should be gone by now
 
-Recovery:
-  - WAL::BufferAbort(batch_ts) writes [CRC][0xFFFFFFFE][batch_ts:8B]
-  - Recover returns aborted timestamps vector
-  - RecoverFromWAL applies marks to active memtable
-  - Existing SSTables (from before abort) get marks via sstable_metadata_ update
+#### Recovery: Batch WAL State Detection
+
+Recovery handles 8 cases based on what's in the WAL after the last checkpoint:
+
+| # | WAL state | Recovery action |
+|---|-----------|-----------------|
+| 1 | Begin + entries + **commit** | Commit closes batch. Entries replayed, visible. |
+| 2 | Begin + entries + **abort** | Abort closes batch, ts added to aborted. Memtable + SSTable metadata marked. Entries skipped during replay. |
+| 3 | Begin + entries, **no commit/abort** (crash) | Auto-abort: ts added to aborted. Same as case 2. |
+| 4 | **Begin-only**, no entries, no commit/abort | No entries persisted. Silently ignored. Zero overhead. |
+| 5 | Checkpoint **after** commit | Checkpoint carries global_ts ≥ batch_ts+1 (batch_ts field = 0). Entries trimmed. No tracking needed. |
+| 6 | Checkpoint **during** batch, commit after | Checkpoint carries batch_ts → batch_opened. Commit marker after checkpoint closes it. Entries visible. |
+| 7 | Checkpoint **during** batch, crash before commit | Same as case 3 — auto-abort via checkpoint's batch_ts. |
+| 8 | Entries flushed to SSTable before crash, no commit/abort | Auto-abort marks active memtable + all SSTable metadata. Flushed entries hidden by SSTable's aborted set. |
+
+**Implementation**: Second pass tracks three sets — `batch_opened` (begin markers), `batch_closed` (commit/abort markers), `batch_has_entries` (actual entry timestamps). Auto-abort only fires when a batch has entries but no close marker. Checkpoint records carry the active batch_ts so the pre-checkpoint WAL doesn't need to be scanned.
 ```
 
 When a reader skips an aborted entry, it naturally finds the **next older committed version** — the `continue` in the lookup loop proceeds to the next MVCC entry for the same key.

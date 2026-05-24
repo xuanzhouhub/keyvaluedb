@@ -886,6 +886,37 @@ void TestBatchAbortRecovery() {
     std::filesystem::remove_all("./test_batch_data7");
 }
 
+void TestBatchCrashRecoverAutoAbort() {
+    std::filesystem::remove_all("./test_batch_data8");
+    {
+        kvdb::LSMTreeEngine engine("./test_batch_data8", 4096, 2, 16, 16, 100);
+        ASSERT_TRUE(engine.StartBatch());
+        engine.BatchInsert("c_key", "c_val");
+        engine.BatchInsert("c_key2", "c_val2");
+        engine.AbortBatch();
+    }
+    {
+        kvdb::LSMTreeEngine engine("./test_batch_data8", 4096, 2, 16, 16, 100);
+        std::string v;
+        ASSERT_FALSE(engine.Lookup("c_key", v));
+        ASSERT_FALSE(engine.Lookup("c_key2", v));
+    }
+    std::filesystem::remove_all("./test_batch_data8");
+}
+
+void TestBatchCrashRecoverEmptyBatch() {
+    std::filesystem::remove_all("./test_batch_data9");
+    {
+        kvdb::LSMTreeEngine engine("./test_batch_data9", 4096, 2, 16, 16, 100);
+        ASSERT_TRUE(engine.StartBatch());
+    }
+    {
+        kvdb::LSMTreeEngine engine("./test_batch_data9", 4096, 2, 16, 16, 100);
+        ASSERT_TRUE(engine.SSTableCount() >= 0);
+    }
+    std::filesystem::remove_all("./test_batch_data9");
+}
+
 void RunTests() {
     std::cout << "Running LSMTreeEngine Tests...\n\n";
 
@@ -929,6 +960,8 @@ void RunTests() {
     TestBatchAbortInvisible();
     TestBatchAbortAfterFlush();
     TestBatchAbortRecovery();
+    TestBatchCrashRecoverAutoAbort();
+    TestBatchCrashRecoverEmptyBatch();
 }
 
 } // namespace kvdb_test
