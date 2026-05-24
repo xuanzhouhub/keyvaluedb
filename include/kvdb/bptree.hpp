@@ -4,6 +4,7 @@
 #include "types.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -22,11 +23,12 @@ public:
 
     struct alignas(4096) LeafPage {
         uint32_t count       = 0;
-        uint32_t data_start  = kPageSize;
+        uint32_t data_start  = kPageSize - 8;
         uint32_t slot_end    = 24;
         uint32_t _pad        = 0;
         LeafPage* next       = nullptr;
-        char     data[4072];
+        char     data[4064];
+        std::atomic<uint64_t> version{0};
 
         static constexpr size_t kSlotSize = 14;
         static constexpr uint32_t kSlotBase = 24;
@@ -74,6 +76,7 @@ public:
         std::vector<std::string> keys;
         std::vector<InternalNode*> children;
         std::vector<LeafPage*> child_leaves;
+        std::atomic<uint64_t> version{0};
 
         InternalNode() {
             keys.reserve(kInternalFanout);
