@@ -804,6 +804,58 @@ void TestBatchGapExhausted() {
     std::filesystem::remove_all("./test_batch_data4");
 }
 
+void TestBatchAbortInvisible() {
+    std::filesystem::remove_all("./test_batch_data5");
+    {
+        kvdb::LSMTreeEngine engine("./test_batch_data5", 4096, 2, 16, 16, 100);
+        ASSERT_TRUE(engine.StartBatch());
+        engine.BatchInsert("aborted_key", "aborted_val");
+        ASSERT_TRUE(engine.AbortBatch());
+
+        std::string v;
+        ASSERT_FALSE(engine.Lookup("aborted_key", v));
+
+        engine.Insert("normal_key", "normal_val");
+        ASSERT_TRUE(engine.Lookup("normal_key", v));
+        ASSERT_STREQ("normal_val", v);
+        ASSERT_FALSE(engine.Lookup("aborted_key", v));
+    }
+    std::filesystem::remove_all("./test_batch_data5");
+}
+
+void TestBatchAbortAfterFlush() {
+    std::filesystem::remove_all("./test_batch_data6");
+    {
+        kvdb::LSMTreeEngine engine("./test_batch_data6", 4096, 2, 16, 16, 100);
+        ASSERT_TRUE(engine.StartBatch());
+        engine.BatchInsert("ab_1", "v1");
+        engine.BatchInsert("ab_2", "v2");
+        engine.AbortBatch();
+
+        engine.Flush();
+        engine.WaitForPendingFlushes();
+
+        engine.Insert("normal", "nv");
+
+        std::string v;
+        ASSERT_FALSE(engine.Lookup("ab_1", v));
+        ASSERT_FALSE(engine.Lookup("ab_2", v));
+        ASSERT_TRUE(engine.Lookup("normal", v));
+        ASSERT_STREQ("nv", v);
+
+        auto iter = engine.RangeScan();
+        bool found_ab1 = false, found_norm = false;
+        while (iter.Valid()) {
+            if (iter.Key() == "ab_1") found_ab1 = true;
+            if (iter.Key() == "normal") found_norm = true;
+            iter.Next();
+        }
+        ASSERT_FALSE(found_ab1);
+        ASSERT_TRUE(found_norm);
+    }
+    std::filesystem::remove_all("./test_batch_data6");
+}
+
 void RunTests() {
     std::cout << "Running LSMTreeEngine Tests...\n\n";
 
@@ -844,6 +896,8 @@ void RunTests() {
     TestBatchSingleAtATime();
     TestBatchNormalWritesDuring();
     TestBatchGapExhausted();
+    TestBatchAbortInvisible();
+    TestBatchAbortAfterFlush();
 }
 
 } // namespace kvdb_test
