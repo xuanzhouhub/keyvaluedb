@@ -877,6 +877,15 @@ void LSMTreeEngine::BatchInsert(const std::string& key, const std::string& value
 
     batch_touched_ = true;
 
+    wal_->Buffer(key, value, batch_ts_);
+    size_t my_seq = wal_->CurrentBatchSeq();
+
+    {
+        std::unique_lock<std::mutex> lock(sync_->mtx);
+        sync_->requested_seq = my_seq;
+        sync_->ready_cv.notify_one();
+    }
+
     {
         std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
         active_memtable_->Insert(key, value, batch_ts_, false);
@@ -892,6 +901,15 @@ void LSMTreeEngine::BatchInsert(const std::string& key, const std::string& value
             active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_);
         }
     }
+
+    {
+        std::unique_lock<std::mutex> lock(sync_->mtx);
+        sync_->cv.wait(lock, [this, my_seq] {
+            return sync_->synced_seq >= my_seq;
+        });
+    }
+
+    DrainRecyclePending();
 }
 
 void LSMTreeEngine::BatchDelete(const std::string& key) {
@@ -899,6 +917,15 @@ void LSMTreeEngine::BatchDelete(const std::string& key) {
         throw std::invalid_argument("Key too large for batch");
 
     batch_touched_ = true;
+
+    wal_->Buffer(key, "", batch_ts_);
+    size_t my_seq = wal_->CurrentBatchSeq();
+
+    {
+        std::unique_lock<std::mutex> lock(sync_->mtx);
+        sync_->requested_seq = my_seq;
+        sync_->ready_cv.notify_one();
+    }
 
     {
         std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
@@ -915,6 +942,15 @@ void LSMTreeEngine::BatchDelete(const std::string& key) {
             active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_);
         }
     }
+
+    {
+        std::unique_lock<std::mutex> lock(sync_->mtx);
+        sync_->cv.wait(lock, [this, my_seq] {
+            return sync_->synced_seq >= my_seq;
+        });
+    }
+
+    DrainRecyclePending();
 }
 
 } // namespace kvdb
