@@ -279,8 +279,13 @@ void LSMTreeEngine::RecoverFromWAL() {
         global_ts_ = checkpoint_ts;
     }
 
-    for (uint64_t ts : aborted_batches)
-        active_memtable_->AddAbortedBatch(ts);
+    for (uint64_t ts : aborted_batches) {
+        bool has_entries = false;
+        for (auto& kv : recovered)
+            if (kv.timestamp == ts) { has_entries = true; break; }
+        if (has_entries)
+            active_memtable_->AddAbortedBatch(ts);
+    }
 
     if (recovered.empty()) {
         return;
