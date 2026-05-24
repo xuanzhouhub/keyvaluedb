@@ -173,10 +173,14 @@ keyvaluedb/
 
 ### Batch Write (Step 8, in progress)
 - **Dual write queues**: normal (`write_queue_`, priority) + batch (`batch_queue_`, secondary).
-- **Writer loop**: drains normal queue first, batch queue only when normal empty.
+- **Writer loop**: normal writes strictly prioritized. Batch mini-batches are atomic — normal writes wait during mini-batch processing.
+- **Async writes**: `BatchPut`/`BatchDelete` respond OK immediately on enqueue. Only block on queue-full backpressure.
+- **Mini-batch bulk load**: writer drains up to `Config::kDefaultMiniBatchSize` (1000) entries at once. Triggers: (1) queue reaches mini_batch_size, (2) queue half-full, (3) batch commit pending.
+- **Commit**: HandleClient blocks until writer drains all remaining batch entries + calls `engine_.CommitBatch()`. Synchronized via `batch_commit_pending_` + `batch_commit_done_cv_`.
 - **Protocol**: `kBatchBeginReq (B)`, `kBatchWriteReq (b)`, `kBatchCommitReq (C)`.
 - **Client**: `StartBatch()`, `BatchPut()`, `BatchDelete()`, `CommitBatch()`.
-- **Timestamp**: assigned at `StartBatch()` — `batch_ts = global_ts + gap` (Config::kDefaultBatchIncrementGap = 1M). All batch writes share the same ts. Readers skip (read_ts < batch_ts) until `CommitBatch()` jumps `global_ts` to `batch_ts + 1`.
+- **Timestamp**: assigned at `StartBatch()` — `batch_ts = global_ts + gap` (Config::kDefaultBatchIncrementGap = 1M). All batch writes share the same ts. Reads skip (read_ts < batch_ts) until `CommitBatch()` jumps `global_ts` to `batch_ts + 1`.
 - **Blocking**: normal `Insert/Delete` block when `global_ts + 1 > batch_ts`. Gap guarantees 1M normal writes fit before blocking.
 - **Sequential**: only one batch active at a time (`batch_in_progress_`).
+- **Compaction**: `visible_ts` filter prevents uncommitted batch entries from overwriting older versions.
 - **Durability**: NOT YET — batch writes skip WAL. Aborted batch entries in memtable survive until flush/compaction GC via tombstones.
