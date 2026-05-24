@@ -14,7 +14,8 @@ class BlockReader;
 
 class SSTable {
 public:
-    static void Write(const std::string& filepath, const std::vector<KeyValuePair>& entries);
+    static void Write(const std::string& filepath, const std::vector<KeyValuePair>& entries,
+                      const std::unordered_set<uint64_t>* aborted = nullptr);
     static void WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk& walk,
                               size_t entry_count, BlockReader* cache = nullptr,
                               uint64_t manifest_seq = 0,

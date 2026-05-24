@@ -112,7 +112,8 @@ uint32_t ReadUint16LE(std::istream& is) {
 
 } // anonymous namespace
 
-void SSTable::Write(const std::string& filepath, const std::vector<KeyValuePair>& entries) {
+void SSTable::Write(const std::string& filepath, const std::vector<KeyValuePair>& entries,
+                    const std::unordered_set<uint64_t>* aborted) {
     std::fstream file(filepath, std::ios::binary|std::ios::trunc|std::ios::in|std::ios::out);
     if(!file.is_open()) throw std::runtime_error("SSTable open failed: "+filepath);
     BloomFilter bloom(entries.empty()?1:entries.size(), 0.01);
@@ -143,7 +144,12 @@ void SSTable::Write(const std::string& filepath, const std::vector<KeyValuePair>
     auto&bd=bloom.Data(); WriteUint32LE(file,static_cast<uint32_t>(bloom.BitCount()));
     WriteUint32LE(file,bloom.HashCount()); WriteUint32LE(file,static_cast<uint32_t>(bd.size()));
     file.write(reinterpret_cast<const char*>(bd.data()),static_cast<std::streamsize>(bd.size()));
-    WriteUint32LE(file, 0);  // aborted_count = 0 (Write() path has no aborted batches)
+    if (aborted) {
+        WriteUint32LE(file, static_cast<uint32_t>(aborted->size()));
+        for (uint64_t ts : *aborted) WriteUint64LE(file, ts);
+    } else {
+        WriteUint32LE(file, 0);
+    }
     WriteUint32LE(file,static_cast<uint32_t>(offsets.size()));
     for(auto o:offsets)WriteUint64LE(file,o);
     for(auto&fk:first_keys){uint16_t kl=static_cast<uint16_t>(fk.size());file.put(char(kl&0xFF));file.put(char((kl>>8)&0xFF));file.write(fk.data(),kl);}
@@ -438,10 +444,14 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
     };
     std::vector<MergeSrc> sources;
 
+    std::unordered_set<uint64_t> merged_aborted;
+    for (auto& in : inputs)
+        merged_aborted.insert(in.aborted_batch_ts.begin(), in.aborted_batch_ts.end());
+
     for (auto& in : inputs) {
         if (in.level == 0) {
             auto it = std::make_unique<SSTableIterator>(in.filepath, cache,
-                                                          in.manifest_seq, false);
+                                                          in.manifest_seq, false, &merged_aborted);
             if (it->Valid()) sources.emplace_back(std::move(it));
         }
     }
@@ -451,8 +461,11 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
         if (in.level > 0) level_groups[in.level].push_back(in);
     }
     for (auto& [lvl, files] : level_groups) {
-        auto li = std::make_unique<LevelIterator>(files, cache);
-        if (li->Valid()) sources.emplace_back(std::move(li));
+        for (auto& meta : files) {
+            auto it = std::make_unique<SSTableIterator>(meta.filepath, cache,
+                                                          meta.manifest_seq, false, &merged_aborted);
+            if (it->Valid()) sources.emplace_back(std::move(it));
+        }
     }
 
     if (sources.empty()) return;
@@ -516,6 +529,8 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
     std::vector<KeyValuePair> batch;
     size_t approx = 0;
 
+    const std::unordered_set<uint64_t>* aborted_ptr = is_last_level ? nullptr : &merged_aborted;
+
     for (;;) {
         auto kvs = nextKey();
         if (kvs.empty()) break;
@@ -526,10 +541,11 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
                 std::ostringstream oss;
                 oss << output_dir << "/sstable_" << seq++ << ".sst";
                 std::string fpath = oss.str();
-                SSTable::Write(fpath, batch);
+                SSTable::Write(fpath, batch, aborted_ptr);
                 Metadata meta = ReadMetadata(fpath);
                 meta.filepath = fpath;
                 meta.level = output_level;
+                if (!is_last_level) meta.aborted_batch_ts = merged_aborted;
                 outputs.push_back(std::move(meta));
                 batch.clear();
                 approx = 0;
@@ -543,10 +559,11 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
         std::ostringstream oss;
         oss << output_dir << "/sstable_" << seq << ".sst";
         std::string fpath = oss.str();
-        SSTable::Write(fpath, batch);
+        SSTable::Write(fpath, batch, aborted_ptr);
         Metadata meta = ReadMetadata(fpath);
         meta.filepath = fpath;
         meta.level = output_level;
+        if (!is_last_level) meta.aborted_batch_ts = merged_aborted;
         outputs.push_back(std::move(meta));
     }
 
