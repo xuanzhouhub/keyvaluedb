@@ -373,7 +373,8 @@ void Server::WriterLoop() {
             std::lock_guard<std::mutex> lock(write_queue_mutex_);
             trigger = (batch_queue_.size() >= mini_batch_size_)
                    || (batch_queue_bytes_ >= max_queue_bytes_ / 2)
-                   || batch_commit_pending_;
+                   || batch_commit_pending_
+                   || (!write_queue_.empty() ? false : !batch_queue_.empty());
             if (!trigger) continue;
 
             commit_mode = batch_commit_pending_;
