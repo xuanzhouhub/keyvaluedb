@@ -23,6 +23,8 @@ static const int kDurationSec = 20;
 static const int kKillIntervalSec = 4;
 static const int kKeyPoolSize = 100;
 static const int kValueMaxLen = 1024;
+static const int kBatchEveryN = 150;
+static const int kBatchOps = 8;
 static const int kRangeScanEveryN = 50;
 
 struct FuzzStats {
@@ -61,6 +63,7 @@ static void ClientThread(int id) {
     std::mt19937 rng(static_cast<unsigned>(id * 12345 + 67890));
     std::uniform_int_distribution<int> key_dist(0, kKeyPoolSize - 1);
     std::uniform_int_distribution<int> op_dist(0, 1);
+    std::uniform_int_distribution<int> binary_dist(0, 1);
 
     auto start = std::chrono::steady_clock::now();
     kvdb::Client client;
@@ -80,6 +83,30 @@ static void ClientThread(int id) {
 
         std::string key = "fuzz_" + std::to_string(key_dist(rng));
         ++op_count;
+
+        if (op_count % kBatchEveryN == 0) {
+            if (client.StartBatch()) {
+                std::vector<std::string> bkeys;
+                for (int bi = 0; bi < kBatchOps; ++bi) {
+                    std::string bk = "fuzz_" + std::to_string(key_dist(rng));
+                    std::string bv = RandomValue(rng);
+                    if (client.BatchPut(bk, bv)) {
+                        bkeys.push_back(bk);
+                        t_last_written[bk] = bv;
+                    }
+                }
+                if (binary_dist(rng) == 0 && !bkeys.empty()) {
+                    if (client.CommitBatch()) {
+                        g_stats.writes_ok += static_cast<uint64_t>(bkeys.size());
+                        std::lock_guard<std::mutex> lock(g_confirmed_mutex);
+                        for (auto& bk : bkeys) g_confirmed[bk] = t_last_written[bk];
+                    }
+                } else {
+                    client.AbortBatch();
+                }
+            }
+            continue;
+        }
 
         if (op_dist(rng) == 0) {
             std::string value = RandomValue(rng);
