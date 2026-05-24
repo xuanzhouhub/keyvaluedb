@@ -28,7 +28,7 @@ public:
         uint32_t _pad        = 0;
         LeafPage* next       = nullptr;
         char     data[4064];
-        std::atomic<uint64_t> version{0};
+        uint64_t version = 0;
 
         static constexpr size_t kSlotSize = 14;
         static constexpr uint32_t kSlotBase = 24;
@@ -76,7 +76,7 @@ public:
         std::vector<std::string> keys;
         std::vector<InternalNode*> children;
         std::vector<LeafPage*> child_leaves;
-        std::atomic<uint64_t> version{0};
+        uint64_t version = 0;
 
         InternalNode() {
             keys.reserve(kInternalFanout);
@@ -94,17 +94,20 @@ public:
     BPlusTree();
     ~BPlusTree();
 
-    static uint64_t ReadVersion(const std::atomic<uint64_t>& v) { return v.load(std::memory_order_acquire); }
-    static bool IsLocked(uint64_t ver) { return (ver & 1) != 0; }
-    static bool TryLock(std::atomic<uint64_t>& v) {
-        uint64_t expected = ReadVersion(v);
-        if (IsLocked(expected)) return false;
-        return v.compare_exchange_weak(expected, expected | 1,
-                                        std::memory_order_acquire,
-                                        std::memory_order_relaxed);
+    static uint64_t ReadVersion(const uint64_t& v) {
+        return reinterpret_cast<const std::atomic<uint64_t>&>(v).load(std::memory_order_acquire);
     }
-    static void UnlockAndBump(std::atomic<uint64_t>& v) {
-        v.fetch_add(1, std::memory_order_release);
+    static bool IsLocked(uint64_t ver) { return (ver & 1) != 0; }
+    static bool TryLock(uint64_t& v) {
+        auto& av = reinterpret_cast<std::atomic<uint64_t>&>(v);
+        uint64_t expected = av.load(std::memory_order_acquire);
+        if (IsLocked(expected)) return false;
+        return av.compare_exchange_weak(expected, expected | 1,
+                                         std::memory_order_acquire,
+                                         std::memory_order_relaxed);
+    }
+    static void UnlockAndBump(uint64_t& v) {
+        reinterpret_cast<std::atomic<uint64_t>&>(v).fetch_add(1, std::memory_order_release);
     }
 
     void Insert(const std::string& key, const std::string& value, uint64_t timestamp, bool is_tombstone = false);
@@ -154,6 +157,13 @@ private:
     static void* Alloc(size_t sz, size_t align);
     static void Free(void* p);
 
+    void CopyLeafContent(LeafPage* dst, const LeafPage* src) {
+        dst->count = src->count;
+        dst->data_start = src->data_start;
+        dst->slot_end = src->slot_end;
+        dst->next = src->next;
+        std::memcpy(dst->data, src->data, 4064);
+    }
     LeafPage* NewLeaf();
     InternalNode* NewInternal();
     LeafPage* FindLeaf(const std::string& key) const;
@@ -171,6 +181,7 @@ private:
     size_t memory_usage_ = 0;
     std::vector<InternalNode*> internal_nodes_;
     std::vector<LeafPage*> leaf_nodes_;
+    std::vector<LeafPage*> retired_leaves_;
     std::unordered_set<uint64_t> aborted_batch_ts_;
 };
 
