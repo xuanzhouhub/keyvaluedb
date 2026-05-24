@@ -25,6 +25,8 @@ public:
 
     void Buffer(const std::string& key, const std::string& value, uint64_t timestamp = 0);
 
+    void BufferAbort(uint64_t batch_ts);
+
     void WriteCheckpoint(uint64_t timestamp);
 
     size_t Sync();
@@ -33,7 +35,8 @@ public:
 
     bool IsSynced(size_t seq) const;
 
-    std::vector<KeyValuePair> Recover(uint64_t* checkpoint_ts = nullptr);
+    std::vector<KeyValuePair> Recover(uint64_t* checkpoint_ts = nullptr,
+                                      std::vector<uint64_t>* aborted = nullptr);
 
     void Clear();
 

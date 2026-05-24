@@ -273,10 +273,15 @@ LSMTreeEngine::~LSMTreeEngine() {
 
 void LSMTreeEngine::RecoverFromWAL() {
     uint64_t checkpoint_ts = 0;
-    auto recovered = wal_->Recover(&checkpoint_ts);
+    std::vector<uint64_t> aborted_batches;
+    auto recovered = wal_->Recover(&checkpoint_ts, &aborted_batches);
     if (checkpoint_ts > global_ts_.load()) {
         global_ts_ = checkpoint_ts;
     }
+
+    for (uint64_t ts : aborted_batches)
+        active_memtable_->AddAbortedBatch(ts);
+
     if (recovered.empty()) {
         return;
     }
@@ -838,6 +843,8 @@ bool LSMTreeEngine::CommitBatch() {
 bool LSMTreeEngine::AbortBatch() {
     std::unique_lock<std::mutex> lock(batch_mutex_);
     if (!batch_in_progress_) return false;
+
+    wal_->BufferAbort(batch_ts_);
 
     {
         std::unique_lock<std::shared_mutex> mlock(memtable_mutex_);

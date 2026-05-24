@@ -86,6 +86,29 @@ void WAL::Buffer(const std::string& key, const std::string& value, uint64_t time
     buffered_entries_++;
 }
 
+void WAL::BufferAbort(uint64_t batch_ts) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    static constexpr uint32_t kAbortSentinel = 0xFFFFFFFE;
+    std::vector<char> body;
+    WriteUint32LE(body, kAbortSentinel);
+    uint64_t ts = batch_ts;
+    body.push_back(static_cast<char>(ts & 0xFF));
+    body.push_back(static_cast<char>((ts >> 8) & 0xFF));
+    body.push_back(static_cast<char>((ts >> 16) & 0xFF));
+    body.push_back(static_cast<char>((ts >> 24) & 0xFF));
+    body.push_back(static_cast<char>((ts >> 32) & 0xFF));
+    body.push_back(static_cast<char>((ts >> 40) & 0xFF));
+    body.push_back(static_cast<char>((ts >> 48) & 0xFF));
+    body.push_back(static_cast<char>((ts >> 56) & 0xFF));
+    CRC32 crc;
+    crc.Update(body.data(), body.size());
+    uint32_t crc_val = crc.Finalize();
+    std::vector<char> entry;
+    WriteUint32LE(entry, crc_val);
+    entry.insert(entry.end(), body.begin(), body.end());
+    write_buf_.insert(write_buf_.end(), entry.begin(), entry.end());
+}
+
 void WAL::WriteCheckpoint(uint64_t timestamp) {
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -147,7 +170,8 @@ bool WAL::IsSynced(size_t seq) const {
     return seq <= synced_seq_;
 }
 
-std::vector<KeyValuePair> WAL::Recover(uint64_t* checkpoint_ts) {
+std::vector<KeyValuePair> WAL::Recover(uint64_t* checkpoint_ts,
+                                        std::vector<uint64_t>* aborted) {
     Sync();
 
     std::fclose(file_);
@@ -215,6 +239,12 @@ std::vector<KeyValuePair> WAL::Recover(uint64_t* checkpoint_ts) {
             continue;
         }
 
+        if (key_len == 0xFFFFFFFE) {
+            if (pos + 8 > file_data.size()) { pos -= 4; break; }
+            pos += 8;
+            continue;
+        }
+
         if (pos + key_len > file_data.size()) break;
         CRC32 crc;
         crc.Update(&key_len, sizeof(key_len));
@@ -259,6 +289,22 @@ std::vector<KeyValuePair> WAL::Recover(uint64_t* checkpoint_ts) {
         pos += 4;
 
         if (key_len == Config::kWALCheckpointSentinel) {
+            continue;
+        }
+
+        if (key_len == 0xFFFFFFFE) {
+            if (pos + 8 > file_data.size()) break;
+            uint64_t aborted_ts =
+                static_cast<uint64_t>(p[pos])
+                | (static_cast<uint64_t>(p[pos + 1]) << 8)
+                | (static_cast<uint64_t>(p[pos + 2]) << 16)
+                | (static_cast<uint64_t>(p[pos + 3]) << 24)
+                | (static_cast<uint64_t>(p[pos + 4]) << 32)
+                | (static_cast<uint64_t>(p[pos + 5]) << 40)
+                | (static_cast<uint64_t>(p[pos + 6]) << 48)
+                | (static_cast<uint64_t>(p[pos + 7]) << 56);
+            pos += 8;
+            if (aborted) aborted->push_back(aborted_ts);
             continue;
         }
 
