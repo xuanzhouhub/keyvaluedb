@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace kvdb {
@@ -96,6 +97,9 @@ public:
     size_t Size() const { return count_; }
     size_t MemoryUsage() const { return memory_usage_; }
 
+    void AddAbortedBatch(uint64_t batch_ts) { aborted_batch_ts_.insert(batch_ts); }
+    const std::unordered_set<uint64_t>& AbortedBatches() const { return aborted_batch_ts_; }
+
     class MemTableWalk {
     public:
         MemTableWalk(const BPlusTree& tree);
@@ -112,6 +116,7 @@ public:
         LeafPage* leaf_ = nullptr;
         uint32_t pos_ = 0;
         KeyValuePair current_;
+        const BPlusTree* tree_ = nullptr;
     };
 
     friend MemTableWalk;
@@ -150,6 +155,7 @@ private:
     size_t memory_usage_ = 0;
     std::vector<InternalNode*> internal_nodes_;
     std::vector<LeafPage*> leaf_nodes_;
+    std::unordered_set<uint64_t> aborted_batch_ts_;
 };
 
 inline void* BPlusTree::Alloc(size_t sz, size_t align) {
@@ -342,6 +348,7 @@ inline bool BPlusTree::Lookup(const std::string& key, uint64_t read_ts, std::str
     if (!leaf->Find(key, idx)) return false;
     for (uint32_t i = idx; i < leaf->count; ++i) {
         if (std::string(leaf->Rec(i), leaf->KeyLen(i)) != key) break;
+        if (aborted_batch_ts_.count(leaf->Timestamp(i))) continue;
         if (leaf->Timestamp(i) <= read_ts) {
             if (leaf->IsTombstone(i)) return false;
             if (leaf->ValLen(i) == kLargeValFlag) {
@@ -378,9 +385,14 @@ inline void BPlusTree::Export(std::vector<KeyValuePair>& out) const {
 }
 
 inline BPlusTree::MemTableWalk::MemTableWalk(const BPlusTree& tree)
-    : leaf_(tree.first_leaf_) {
+    : leaf_(tree.first_leaf_), tree_(&tree) {
     while (leaf_ && leaf_->count == 0) leaf_ = leaf_->next;
-    if (leaf_) Load();
+    if (leaf_) {
+        while (pos_ < leaf_->count && tree_->aborted_batch_ts_.count(leaf_->Timestamp(pos_)))
+            ++pos_;
+        if (pos_ >= leaf_->count) { leaf_ = leaf_->next; pos_ = 0; }
+    }
+    Load();
 }
 
 inline bool BPlusTree::MemTableWalk::Valid() const {
@@ -392,6 +404,11 @@ inline void BPlusTree::MemTableWalk::Next() {
     if (leaf_ && pos_ >= leaf_->count) {
         do { leaf_ = leaf_->next; } while (leaf_ && leaf_->count == 0);
         pos_ = 0;
+    }
+    if (tree_ && leaf_) {
+        while (pos_ < leaf_->count && tree_->aborted_batch_ts_.count(leaf_->Timestamp(pos_)))
+            ++pos_;
+        if (pos_ >= leaf_->count) { do { leaf_ = leaf_->next; } while (leaf_ && leaf_->count == 0); pos_ = 0; }
     }
     Load();
 }
