@@ -833,6 +833,23 @@ bool LSMTreeEngine::CommitBatch() {
     return true;
 }
 
+bool LSMTreeEngine::AbortBatch() {
+    std::unique_lock<std::mutex> lock(batch_mutex_);
+    if (!batch_in_progress_) return false;
+
+    {
+        std::unique_lock<std::shared_mutex> mlock(memtable_mutex_);
+        active_memtable_->AddAbortedBatch(batch_ts_);
+        for (auto& m : frozen_memtables_)
+            m->AddAbortedBatch(batch_ts_);
+    }
+
+    batch_in_progress_ = false;
+    lock.unlock();
+    batch_cv_.notify_all();
+    return true;
+}
+
 void LSMTreeEngine::BatchInsert(const std::string& key, const std::string& value) {
     if (key.size() > Config::kMaxKeyBytes)
         throw std::invalid_argument("Key too large for batch");

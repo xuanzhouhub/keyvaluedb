@@ -45,6 +45,7 @@ public:
 
     bool StartBatch();
     bool CommitBatch();
+    bool AbortBatch();
     void BatchInsert(const std::string& key, const std::string& value);
     void BatchDelete(const std::string& key);
     uint64_t BatchGap() const { return batch_increment_gap_; }

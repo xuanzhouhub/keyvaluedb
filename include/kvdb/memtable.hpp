@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace kvdb {
@@ -39,6 +40,9 @@ public:
 
     uint64_t Id() const { return id_; }
     const BPlusTree& GetTree() const { return tree_; }
+
+    void AddAbortedBatch(uint64_t ts) { tree_.AddAbortedBatch(ts); }
+    const std::unordered_set<uint64_t>& AbortedBatches() const { return tree_.AbortedBatches(); }
 
 private:
     BPlusTree tree_;
