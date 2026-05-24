@@ -25,6 +25,7 @@ struct Protocol {
     static const uint8_t kBatchWriteReq = 'b';
     static const uint8_t kBatchCommitReq = 'C';
     static const uint8_t kBatchAbortReq  = 'A';
+    static const uint8_t kCompareAndSwapReq = 'Z';
     static const uint8_t kOkResp        = 'O';
     static const uint8_t kValueResp     = 'V';
     static const uint8_t kNotFoundResp  = 'N';

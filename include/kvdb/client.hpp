@@ -34,6 +34,10 @@ public:
     bool CommitBatch();
     bool AbortBatch();
 
+    bool CompareAndSwap(const std::string& key,
+                        const std::string& expected,
+                        const std::string& desired);
+
 private:
     socket_t sock_ = kInvalidSocket;
 };

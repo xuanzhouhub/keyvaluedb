@@ -52,6 +52,10 @@ public:
 
     bool Lookup(const std::string& key, std::string& value_out) const;
 
+    bool CompareAndSwap(const std::string& key,
+                        const std::string& expected,
+                        const std::string& desired);
+
     bool NeedsFlush() const;
 
     void Flush();

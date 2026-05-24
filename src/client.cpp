@@ -213,4 +213,19 @@ bool Client::AbortBatch() {
     return RecvAll(sock_, &resp, 1) && resp == Protocol::kOkResp;
 }
 
+bool Client::CompareAndSwap(const std::string& key,
+                             const std::string& expected,
+                             const std::string& desired) {
+    if (sock_ == kInvalidSocket) return false;
+    unsigned char req = Protocol::kCompareAndSwapReq;
+    if (!SendAll(sock_, &req, 1)) return false;
+    if (!SendString(sock_, key)) return false;
+    if (!SendString(sock_, expected)) return false;
+    if (!SendString(sock_, desired)) return false;
+
+    unsigned char resp;
+    if (!RecvAll(sock_, &resp, 1)) return false;
+    return resp == Protocol::kOkResp;
+}
+
 } // namespace kvdb

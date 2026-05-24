@@ -48,10 +48,12 @@ private:
     struct WriteRequest {
         std::string key;
         std::string value;
+        std::string expected_value;
         std::promise<bool> promise;
         socket_t client_sock;
         bool is_delete = false;
         bool is_batch = false;
+        bool is_cas = false;
     };
 
     std::queue<WriteRequest> write_queue_;

@@ -294,6 +294,40 @@ void Server::HandleClient(socket_t client_sock) {
             unsigned char resp = Protocol::kOkResp;
             SendAll(client_sock, &resp, 1);
 
+        } else if (req_type == Protocol::kCompareAndSwapReq) {
+            if (!RecvUint32(client_sock, key_len)) break;
+            key.resize(key_len);
+            if (!RecvAll(client_sock, &key[0], key_len)) break;
+
+            std::string expected, desired;
+            if (!RecvString(client_sock, expected)) break;
+            if (!RecvString(client_sock, desired)) break;
+
+            WriteRequest req;
+            req.key = std::move(key);
+            req.expected_value = std::move(expected);
+            req.value = std::move(desired);
+            req.is_cas = true;
+            req.client_sock = client_sock;
+            auto future = req.promise.get_future();
+
+            {
+                std::unique_lock<std::mutex> lock(write_queue_mutex_);
+                size_t req_size = req.key.size() + req.value.size() + req.expected_value.size();
+                write_queue_not_full_cv_.wait(lock, [this, req_size] {
+                    return queue_bytes_ + req_size <= max_queue_bytes_
+                        || should_stop_.load();
+                });
+                if (should_stop_.load()) break;
+                queue_bytes_ += req_size;
+                write_queue_.push(std::move(req));
+            }
+            write_queue_cv_.notify_one();
+
+            bool result = future.get();
+            unsigned char resp = result ? Protocol::kOkResp : Protocol::kErrorResp;
+            SendAll(client_sock, &resp, 1);
+
         } else if (req_type == Protocol::kRangeScanReq) {
             RangeBound lower, upper;
             if (!RecvRangeBound(client_sock, lower)) break;
@@ -371,7 +405,10 @@ void Server::WriterLoop() {
         if (has_normal) {
             write_queue_not_full_cv_.notify_one();
             try {
-                if (normal_req.is_delete)
+                if (normal_req.is_cas)
+                    resolvePromise(normal_req, engine_.CompareAndSwap(
+                        normal_req.key, normal_req.expected_value, normal_req.value));
+                else if (normal_req.is_delete)
                     engine_.Delete(normal_req.key);
                 else
                     engine_.Insert(normal_req.key, normal_req.value);
