@@ -94,6 +94,19 @@ public:
     BPlusTree();
     ~BPlusTree();
 
+    static uint64_t ReadVersion(const std::atomic<uint64_t>& v) { return v.load(std::memory_order_acquire); }
+    static bool IsLocked(uint64_t ver) { return (ver & 1) != 0; }
+    static bool TryLock(std::atomic<uint64_t>& v) {
+        uint64_t expected = ReadVersion(v);
+        if (IsLocked(expected)) return false;
+        return v.compare_exchange_weak(expected, expected | 1,
+                                        std::memory_order_acquire,
+                                        std::memory_order_relaxed);
+    }
+    static void UnlockAndBump(std::atomic<uint64_t>& v) {
+        v.fetch_add(1, std::memory_order_release);
+    }
+
     void Insert(const std::string& key, const std::string& value, uint64_t timestamp, bool is_tombstone = false);
     bool Lookup(const std::string& key, uint64_t read_ts, std::string& value_out) const;
     void Export(std::vector<KeyValuePair>& out) const;
