@@ -1,6 +1,8 @@
 #include "kvdb/server.hpp"
 #include "kvdb/engine.hpp"
 
+#include <deque>
+#include <future>
 #include <iostream>
 #include <stdexcept>
 
@@ -374,11 +376,39 @@ void Server::WriterLoop() {
     };
 
     while (true) {
+        if (pending_cas_.busy) {
+            auto status = pending_cas_.read_future.wait_for(
+                std::chrono::milliseconds(0));
+            if (status == std::future_status::ready) {
+                std::string current = pending_cas_.read_future.get();
+                bool swapped = !current.empty()
+                    && current == pending_cas_.expected;
+                if (swapped)
+                    engine_.Insert(pending_cas_.key, pending_cas_.desired);
+
+                try {
+                    pending_cas_.promise.set_value(swapped);
+                } catch (...) {}
+                pending_cas_.busy = false;
+
+                {
+                    std::lock_guard<std::mutex> lock(write_queue_mutex_);
+                    while (!deferred_requests_.empty()) {
+                        write_queue_.push(std::move(deferred_requests_.front()));
+                        deferred_requests_.pop_front();
+                    }
+                }
+                write_queue_cv_.notify_one();
+                continue;
+            }
+        }
+
         {
             std::unique_lock<std::mutex> lock(write_queue_mutex_);
             write_queue_cv_.wait(lock, [this] {
                 return !write_queue_.empty() || !batch_queue_.empty()
-                    || batch_commit_pending_ || should_stop_.load();
+                    || batch_commit_pending_ || should_stop_.load()
+                    || pending_cas_.busy;
             });
         }
 
@@ -386,7 +416,8 @@ void Server::WriterLoop() {
         {
             std::lock_guard<std::mutex> lock(write_queue_mutex_);
             if (should_stop_.load() && write_queue_.empty()
-                && batch_queue_.empty() && !batch_commit_pending_)
+                && batch_queue_.empty() && !batch_commit_pending_
+                && !pending_cas_.busy)
                 stop = true;
         }
         if (stop) break;
@@ -396,19 +427,38 @@ void Server::WriterLoop() {
         {
             std::lock_guard<std::mutex> lock(write_queue_mutex_);
             if (!write_queue_.empty() && !batch_commit_pending_) {
-                normal_req = std::move(write_queue_.front());
-                write_queue_.pop();
-                queue_bytes_ -= (normal_req.key.size() + normal_req.value.size());
-                has_normal = true;
+                auto& front = write_queue_.front();
+                if (pending_cas_.busy
+                    && (front.is_cas || front.key == pending_cas_.key)) {
+                    deferred_requests_.push_back(std::move(front));
+                    write_queue_.pop();
+                } else {
+                    normal_req = std::move(front);
+                    write_queue_.pop();
+                    queue_bytes_ -= (normal_req.key.size() + normal_req.value.size());
+                    has_normal = true;
+                }
             }
         }
         if (has_normal) {
             write_queue_not_full_cv_.notify_one();
+            if (normal_req.is_cas) {
+                pending_cas_.key = normal_req.key;
+                pending_cas_.expected = std::move(normal_req.expected_value);
+                pending_cas_.desired = std::move(normal_req.value);
+                pending_cas_.promise = std::move(normal_req.promise);
+                pending_cas_.read_future = std::async(std::launch::async,
+                    [this, key = pending_cas_.key]() -> std::string {
+                        std::string val;
+                        engine_.Lookup(key, val);
+                        return val;
+                    });
+                pending_cas_.busy = true;
+                continue;
+            }
+
             try {
-                if (normal_req.is_cas)
-                    resolvePromise(normal_req, engine_.CompareAndSwap(
-                        normal_req.key, normal_req.expected_value, normal_req.value));
-                else if (normal_req.is_delete)
+                if (normal_req.is_delete)
                     engine_.Delete(normal_req.key);
                 else
                     engine_.Insert(normal_req.key, normal_req.value);

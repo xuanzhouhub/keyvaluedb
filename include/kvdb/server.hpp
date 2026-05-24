@@ -68,6 +68,18 @@ private:
     size_t mini_batch_size_ = Config::kDefaultMiniBatchSize;
     bool batch_commit_pending_ = false;
 
+    struct PendingCAS {
+        std::string key;
+        std::string expected;
+        std::string desired;
+        std::promise<bool> promise;
+        std::future<std::string> read_future;
+        bool busy = false;
+    };
+    PendingCAS pending_cas_;
+
+    std::deque<WriteRequest> deferred_requests_;
+
     std::atomic<bool> running_{false};
     std::atomic<bool> should_stop_{false};
 };
