@@ -251,13 +251,24 @@ inline bool BPlusTree::LeafPage::InsertEntry(
 }
 
 inline BPlusTree::LeafPage* BPlusTree::FindLeaf(const std::string& key) const {
-    InternalNode* node = root_;
-    while (node) {
-        uint32_t idx = node->FindChild(key);
-        if (node->children[idx] == nullptr) return node->child_leaves[idx];
-        node = node->children[idx];
+    for (;;) {
+        InternalNode* node = root_;
+        if (!node) return nullptr;
+        LeafPage* leaf = nullptr;
+        bool valid = true;
+        while (node && valid) {
+            uint64_t v1 = ReadVersion(node->version);
+            if (IsLocked(v1)) continue;
+            uint32_t idx = node->FindChild(key);
+            if (node->children[idx] == nullptr)
+                leaf = node->child_leaves[idx];
+            InternalNode* next = node->children[idx];
+            uint64_t v2 = ReadVersion(node->version);
+            if (v1 != v2) { valid = false; break; }
+            node = next;
+        }
+        if (valid && leaf) return leaf;
     }
-    return nullptr;
 }
 inline BPlusTree::LeafPage* BPlusTree::FindLeafForWrite(
     const std::string& key, std::vector<InternalNode*>& path, std::vector<uint32_t>& indices) {
@@ -358,26 +369,33 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
     memory_usage_ += key.size() + value.size() + Config::kMemTableEntryOverheadBytes;
 }
 inline bool BPlusTree::Lookup(const std::string& key, uint64_t read_ts, std::string& value_out) const {
-    LeafPage* leaf = FindLeaf(key);
-    if (!leaf) return false;
-    uint32_t idx;
-    if (!leaf->Find(key, idx)) return false;
-    for (uint32_t i = idx; i < leaf->count; ++i) {
-        if (std::string(leaf->Rec(i), leaf->KeyLen(i)) != key) break;
-        if (aborted_batch_ts_.count(leaf->Timestamp(i))) continue;
-        if (leaf->Timestamp(i) <= read_ts) {
-            if (leaf->IsTombstone(i)) return false;
-            if (leaf->ValLen(i) == kLargeValFlag) {
-                void* blob; std::memcpy(&blob, leaf->Rec(i) + leaf->KeyLen(i), sizeof(void*));
-                size_t sz; std::memcpy(&sz, blob, 8);
-                value_out.assign(static_cast<const char*>(blob) + 8, sz);
-            } else {
-                value_out.assign(leaf->Rec(i) + leaf->KeyLen(i), leaf->ValLen(i));
+    for (;;) {
+        LeafPage* leaf = FindLeaf(key);
+        if (!leaf) return false;
+        uint64_t v1 = ReadVersion(leaf->version);
+        uint32_t idx;
+        if (!leaf->Find(key, idx)) return false;
+        bool found = false;
+        for (uint32_t i = idx; i < leaf->count; ++i) {
+            if (std::string(leaf->Rec(i), leaf->KeyLen(i)) != key) break;
+            if (aborted_batch_ts_.count(leaf->Timestamp(i))) continue;
+            if (leaf->Timestamp(i) <= read_ts) {
+                if (leaf->IsTombstone(i)) return false;
+                if (leaf->ValLen(i) == kLargeValFlag) {
+                    void* blob; std::memcpy(&blob, leaf->Rec(i) + leaf->KeyLen(i), sizeof(void*));
+                    size_t sz; std::memcpy(&sz, blob, 8);
+                    value_out.assign(static_cast<const char*>(blob) + 8, sz);
+                } else {
+                    value_out.assign(leaf->Rec(i) + leaf->KeyLen(i), leaf->ValLen(i));
+                }
+                found = true;
+                break;
             }
-            return true;
         }
+        if (!found) return false;
+        uint64_t v2 = ReadVersion(leaf->version);
+        if (v1 == v2 && !IsLocked(v1)) return true;
     }
-    return false;
 }
 inline void BPlusTree::Export(std::vector<KeyValuePair>& out) const {
     for (LeafPage* leaf = first_leaf_; leaf; leaf = leaf->next)
