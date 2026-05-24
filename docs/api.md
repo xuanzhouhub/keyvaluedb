@@ -247,6 +247,16 @@ bool found = client.Read("key", val);
 std::vector<KeyValuePair> results;
 client.RangeScan(RangeBound::Inclusive("a"), RangeBound::Unbounded(), results);
 client.PrefixScan("prefix:", results);
+
+// Batch write
+client.StartBatch();
+client.BatchPut("bk1", "bv1");
+client.BatchPut("bk2", "bv2");
+bool ok = client.CommitBatch();   // or client.AbortBatch();
+
+// Compare-and-swap
+bool swapped = client.CompareAndSwap("key", "expected", "desired");
+
 client.Disconnect();
 ```
 
@@ -256,7 +266,7 @@ client.Disconnect();
 #include <kvdb/config.hpp>
 
 Config::kSSTableMagic               // 0x4B535354
-Config::kSSTableVersion             // 5
+Config::kSSTableVersion             // 6
 Config::kSSTableBlockSize           // 4096
 Config::kDefaultMemTableMaxBytes    // 4 MB
 Config::kMaxKeyBytes                // 1024
