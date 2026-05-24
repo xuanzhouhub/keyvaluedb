@@ -172,15 +172,13 @@ keyvaluedb/
 | 9  | Cache sharding — 16-partition mutex like LevelDB | **Done** |
 
 ### Batch Write (Step 8, in progress)
-- **Dual write queues**: normal (`write_queue_`, priority) + batch (`batch_queue_`, secondary).
-- **Writer loop**: normal writes strictly prioritized. Batch mini-batches are atomic — normal writes wait during mini-batch processing.
+- **Dual write queues**: normal (`write_queue_`, strict priority) + batch (`batch_queue_`, secondary). Batch can wait forever.
 - **Async writes**: `BatchPut`/`BatchDelete` respond OK immediately on enqueue. Only block on queue-full backpressure.
-- **Mini-batch bulk load**: writer drains up to `Config::kDefaultMiniBatchSize` (1000) entries at once. Triggers: (1) queue reaches mini_batch_size, (2) queue half-full, (3) batch commit pending.
+- **Mini-batch bulk load**: writer drains up to `Config::kDefaultMiniBatchSize` (1000) entries at once. Triggers: (1) queue reaches mini_batch_size, (2) queue half-full, (3) batch commit pending. Mini-batches are atomic — normal writes wait during mini-batch processing.
+- **Timestamp**: assigned at `StartBatch()` — `batch_ts = global_ts + gap` (Config::kDefaultBatchIncrementGap = 1M). All writes share one ts. MVCC isolation: readers skip (read_ts < batch_ts) until `CommitBatch()` jumps `global_ts` past `batch_ts + 1`.
 - **Commit**: HandleClient blocks until writer drains all remaining batch entries + calls `engine_.CommitBatch()`. Synchronized via `batch_commit_pending_` + `batch_commit_done_cv_`.
-- **Protocol**: `kBatchBeginReq (B)`, `kBatchWriteReq (b)`, `kBatchCommitReq (C)`.
-- **Client**: `StartBatch()`, `BatchPut()`, `BatchDelete()`, `CommitBatch()`.
-- **Timestamp**: assigned at `StartBatch()` — `batch_ts = global_ts + gap` (Config::kDefaultBatchIncrementGap = 1M). All batch writes share the same ts. Reads skip (read_ts < batch_ts) until `CommitBatch()` jumps `global_ts` to `batch_ts + 1`.
-- **Blocking**: normal `Insert/Delete` block when `global_ts + 1 > batch_ts`. Gap guarantees 1M normal writes fit before blocking.
-- **Sequential**: only one batch active at a time (`batch_in_progress_`).
-- **Compaction**: `visible_ts` filter prevents uncommitted batch entries from overwriting older versions.
-- **Durability**: NOT YET — batch writes skip WAL. Aborted batch entries in memtable survive until flush/compaction GC via tombstones.
+- **Abort (untouched)**: if no mini-batch drained, clear batch_queue_ instantly — zero pollution.
+- **Abort (touched)**: WAL abort record written. `batch_touched_` flag on engine. Remaining queue entries discarded. `batch_ts` added to `aborted_batch_ts_` on all memtables + SSTable metadata. All read paths skip entries with aborted timestamps, falling through to the next older committed version.
+- **Deletion mark lifetime**: memtable → SSTable (flushed in CRC-COVERED REGION) → propagated through compaction levels. Dropped at bottom level when all aborted entries have been compacted out.
+- **Recovery**: WAL::BufferAbort writes `[CRC][0xFFFFFFFE][batch_ts:8B]`. Recover returns aborted timestamps. RecoverFromWAL applies to active memtable + existing SSTable metadata.
+- **Sequential**: only one batch active at a time (`batch_in_progress_` via `batch_mutex_`).

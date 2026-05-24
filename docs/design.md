@@ -178,6 +178,93 @@ Insert(key, value):
 
 Key point: the SSTable flush has been moved to the **Flush worker**. The writer only freezes the memtable and notifies the worker — it never blocks on disk I/O.
 
+### Batch Write Path
+
+Batch writes allow many keys to be committed atomically with a single timestamp. The design has three layers: client protocol, server queue management, and engine timestamp control.
+
+#### Timestamp Assignment
+
+```
+StartBatch:
+  batch_ts = global_ts_.load() + batch_increment_gap  (gap = 1M, configurable)
+  All batch writes share batch_ts.
+  Only one batch active at a time (batch_mutex_ + batch_in_progress_).
+
+Normal writes during batch:
+  Increment global_ts_ as usual (fetch_add(1) + 1).
+  If global_ts reaches batch_ts → BLOCK at batch_cv_ until batch completes.
+  Gap ensures 1M normal writes fit before blocking.
+
+Reader visibility:
+  read_ts = global_ts_.load()  → always < batch_ts during batch.
+  Batch entries invisible to readers until commit.
+
+CommitBatch:
+  global_ts_.store(batch_ts + 1)              ← jump over batch_ts
+  All batch entries become visible to future readers.
+  Blocked normal writers unblocked via batch_cv_.
+```
+
+#### Server Dual-Queue + Mini-Batch
+
+```
+Two queues: normal (write_queue_, priority) + batch (batch_queue_, secondary).
+
+Writer loop:
+  Normal writes: always first — pop one, process, repeat.
+  Batch writes: enqueued async. Writer drains in mini-batches.
+
+Mini-batch triggers:
+  (a) batch_queue_.size() >= mini_batch_size_  (default 1000)
+  (b) batch_queue_bytes_ >= max_queue_bytes_ / 2
+  (c) batch_commit_pending_ is true
+
+When triggered: drain up to mini_batch_size_ entries, call engine.BatchInsert/BatchDelete.
+During mini-batch processing: normal writes WAIT (atomic mini-batch).
+After mini-batch: normal writes resume priority.
+
+Commit: HandleClient sets batch_commit_pending_, waits on batch_commit_done_cv_.
+         Writer drains all remaining, calls engine.CommitBatch(), signals CV.
+
+Abort (small batch, nothing touched memtable):
+  Clear batch_queue_ — instantaneous, zero pollution.
+
+Abort (large batch, some mini-batches persisted):
+  Clear remaining queue entries.
+  engine.AbortBatch() writes WAL abort record.
+  Add batch_ts to aborted_batch_ts_ on all memtables + SSTable metadata.
+```
+
+#### Aborted Entry Visibility
+
+Aborted entries are marked — not deleted — because MVCC entries are immutable. The mark (`aborted_batch_ts_`) propagates through:
+
+```
+MemTable (BPlusTree::aborted_batch_ts_):
+  - Lookup: skip entries with timestamp in aborted set
+  - MemTableWalk (flush): skip aborted entries — never written to SSTable
+
+SSTable (Metadata::aborted_batch_ts_):
+  - Persisted in CRC-COVERED REGION of SSTable file (one per level)
+  - scanBlock (LookupKey): skip entries with aborted timestamp
+  - SSTableIterator (RangeScan): skip via Next() check
+  - LevelIterator: propagates from Metadata to SSTableIterator
+
+Compaction:
+  - Union aborted_batch_ts_ from all input SSTables
+  - Pass unioned set to SSTableIterator → auto-skip aborted entries
+  - Output metadata inherits union (NOT at bottom level)
+  - At bottom level: marks dropped — all batch entries should be gone by now
+
+Recovery:
+  - WAL::BufferAbort(batch_ts) writes [CRC][0xFFFFFFFE][batch_ts:8B]
+  - Recover returns aborted timestamps vector
+  - RecoverFromWAL applies marks to active memtable
+  - Existing SSTables (from before abort) get marks via sstable_metadata_ update
+```
+
+When a reader skips an aborted entry, it naturally finds the **next older committed version** — the `continue` in the lookup loop proceeds to the next MVCC entry for the same key.
+
 ### Read Path (Reader threads)
 
 ```
@@ -317,6 +404,10 @@ The `fence_ts` is set after the manifest swap. New readers will see the new meta
 | DrainRecyclePending | C → B |
 | DeferFileGC | E |
 | DrainFileGC | E |
+| StartBatch | batch_mutex_ |
+| CommitBatch | batch_mutex_ → batch_cv_ notify |
+| AbortBatch  | batch_mutex_ → B (shared) → D (if SSTable marks) |
+| BatchInsert | batch_mutex_(shared via timestamp) → B |
 | Destructor | stop compactor → stop flush → stop sync → B (drain) → E (DrainFileGC) |
 
 ### Invariants
@@ -332,3 +423,8 @@ The `fence_ts` is set after the manifest swap. New readers will see the new meta
 9. **Cache key stability**: cache entries are keyed by `manifest_seq` (monotonic, immutable across manifest operations) rather than filepath. Filepath-based keys would be fragile across compaction file swapping.
 10. **Compaction cache isolation**: compaction uses the 1-arg `SSTableIterator` constructor (`reader_=nullptr`), which skips all cache operations. Compaction I/O never evicts user-hot blocks from the LRU cache.
 11. **Batch write timestamps**: assigned at `StartBatch()` time — `batch_ts = global_ts + gap`. All batch writes share this timestamp. Reads naturally skip batch entries (read_ts < batch_ts) until `CommitBatch()` jumps `global_ts` past it. *(Previous design of assigning timestamp at commit time was abandoned in favor of start-time assignment, which avoids timestamp indirection in WAL/SSTable records.)*
+12. **Batch atomicity**: all writes in a batch share one timestamp. They become visible or invisible as a unit — no partial visibility.
+13. **Batch abort safety**: aborted batch entries are skipped via `aborted_batch_ts_` checks at every read layer. The next older committed version is returned instead. Aborted entries are never lost — they survive in the SSTable until compaction GC.
+14. **Deletion mark propagation**: aborted batch timestamps persist through flushes (memtable → SSTable) and compactions (input SSTable → output SSTable). Marks are dropped only at the bottom compaction level, once all aborted entries have been physically removed.
+15. **Zero-pollution abort**: if no mini-batch drained before abort (small batches), no WAL record or deletion mark is written — the batch queue is simply cleared.
+16. **Mini-batch atomicity**: once a mini-batch begins processing, normal writes wait. The mini-batch completes atomically to avoid mixed visibility within the batch.
