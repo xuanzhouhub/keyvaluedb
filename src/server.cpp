@@ -278,6 +278,22 @@ void Server::HandleClient(socket_t client_sock) {
             unsigned char resp = Protocol::kOkResp;
             SendAll(client_sock, &resp, 1);
 
+        } else if (req_type == Protocol::kBatchAbortReq) {
+            {
+                std::lock_guard<std::mutex> lock(write_queue_mutex_);
+                while (!batch_queue_.empty()) {
+                    batch_queue_bytes_ -= (batch_queue_.front().key.size()
+                                        + batch_queue_.front().value.size());
+                    batch_queue_.pop();
+                }
+                batch_commit_pending_ = false;
+            }
+            write_queue_not_full_cv_.notify_all();
+
+            engine_.AbortBatch();
+            unsigned char resp = Protocol::kOkResp;
+            SendAll(client_sock, &resp, 1);
+
         } else if (req_type == Protocol::kRangeScanReq) {
             RangeBound lower, upper;
             if (!RecvRangeBound(client_sock, lower)) break;

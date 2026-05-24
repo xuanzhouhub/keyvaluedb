@@ -32,6 +32,7 @@ public:
     bool BatchPut(const std::string& key, const std::string& value);
     bool BatchDelete(const std::string& key);
     bool CommitBatch();
+    bool AbortBatch();
 
 private:
     socket_t sock_ = kInvalidSocket;

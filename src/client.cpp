@@ -205,4 +205,12 @@ bool Client::CommitBatch() {
     return RecvAll(sock_, &resp, 1) && resp == Protocol::kOkResp;
 }
 
+bool Client::AbortBatch() {
+    if (sock_ == kInvalidSocket) return false;
+    unsigned char req = Protocol::kBatchAbortReq;
+    if (!SendAll(sock_, &req, 1)) return false;
+    unsigned char resp;
+    return RecvAll(sock_, &resp, 1) && resp == Protocol::kOkResp;
+}
+
 } // namespace kvdb
