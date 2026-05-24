@@ -279,8 +279,14 @@ void LSMTreeEngine::RecoverFromWAL() {
         global_ts_ = checkpoint_ts;
     }
 
-    for (uint64_t ts : aborted_batches)
+    for (uint64_t ts : aborted_batches) {
         active_memtable_->AddAbortedBatch(ts);
+        {
+            std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+            for (auto& meta : sstable_metadata_)
+                meta.aborted_batch_ts.insert(ts);
+        }
+    }
 
     if (recovered.empty()) {
         return;
