@@ -114,20 +114,16 @@ void WAL::BufferBatchCommit(uint64_t batch_ts) {
     WriteSentinelRecord(0xFFFFFFFC, batch_ts, write_buf_);
 }
 
-void WAL::WriteCheckpoint(uint64_t timestamp) {
+void WAL::WriteCheckpoint(uint64_t timestamp, uint64_t batch_ts) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     std::vector<char> body;
     WriteUint32LE(body, Config::kWALCheckpointSentinel);
 
-    body.push_back(static_cast<char>(timestamp & 0xFF));
-    body.push_back(static_cast<char>((timestamp >> 8) & 0xFF));
-    body.push_back(static_cast<char>((timestamp >> 16) & 0xFF));
-    body.push_back(static_cast<char>((timestamp >> 24) & 0xFF));
-    body.push_back(static_cast<char>((timestamp >> 32) & 0xFF));
-    body.push_back(static_cast<char>((timestamp >> 40) & 0xFF));
-    body.push_back(static_cast<char>((timestamp >> 48) & 0xFF));
-    body.push_back(static_cast<char>((timestamp >> 56) & 0xFF));
+    for (int i = 0; i < 8; ++i)
+        body.push_back(static_cast<char>((timestamp >> (i * 8)) & 0xFF));
+    for (int i = 0; i < 8; ++i)
+        body.push_back(static_cast<char>((batch_ts >> (i * 8)) & 0xFF));
 
     CRC32 crc;
     crc.Update(body.data(), body.size());
@@ -205,8 +201,16 @@ std::vector<KeyValuePair> WAL::Recover(uint64_t* checkpoint_ts,
 
     const unsigned char* p = reinterpret_cast<const unsigned char*>(file_data.data());
 
+    auto ReadUint64From = [](const unsigned char* d) -> uint64_t {
+        return static_cast<uint64_t>(d[0]) | (static_cast<uint64_t>(d[1]) << 8)
+             | (static_cast<uint64_t>(d[2]) << 16) | (static_cast<uint64_t>(d[3]) << 24)
+             | (static_cast<uint64_t>(d[4]) << 32) | (static_cast<uint64_t>(d[5]) << 40)
+             | (static_cast<uint64_t>(d[6]) << 48) | (static_cast<uint64_t>(d[7]) << 56);
+    };
+
     long last_checkpoint_end = 0;
     uint64_t found_ts = 0;
+    uint64_t checkpoint_batch_ts = 0;
 
     size_t     pos = 0;
     while (pos + 4 <= file_data.size()) {
@@ -225,21 +229,26 @@ std::vector<KeyValuePair> WAL::Recover(uint64_t* checkpoint_ts,
 
         if (key_len == Config::kWALCheckpointSentinel) {
             if (pos + 8 > file_data.size()) { pos -= 4; break; }
+            uint64_t ckpt_ts = ReadUint64From(p + pos);
+            if (pos + 16 <= file_data.size()) {
+                CRC32 crc;
+                crc.Update(&key_len, sizeof(key_len));
+                crc.Update(p + pos, 16);
+                if (crc.Finalize() == checksum) {
+                    last_checkpoint_end = static_cast<long>(pos + 16);
+                    found_ts = ckpt_ts;
+                    checkpoint_batch_ts = ReadUint64From(p + pos + 8);
+                    pos += 16;
+                    continue;
+                }
+            }
             CRC32 crc;
             crc.Update(&key_len, sizeof(key_len));
             crc.Update(p + pos, 8);
             pos += 8;
             if (crc.Finalize() == checksum) {
                 last_checkpoint_end = static_cast<long>(pos);
-                found_ts =
-                    static_cast<uint64_t>(p[pos - 8])
-                    | (static_cast<uint64_t>(p[pos - 7]) << 8)
-                    | (static_cast<uint64_t>(p[pos - 6]) << 16)
-                    | (static_cast<uint64_t>(p[pos - 5]) << 24)
-                    | (static_cast<uint64_t>(p[pos - 4]) << 32)
-                    | (static_cast<uint64_t>(p[pos - 3]) << 40)
-                    | (static_cast<uint64_t>(p[pos - 2]) << 48)
-                    | (static_cast<uint64_t>(p[pos - 1]) << 56);
+                found_ts = ckpt_ts;
             }
             continue;
         }
@@ -279,13 +288,10 @@ std::vector<KeyValuePair> WAL::Recover(uint64_t* checkpoint_ts,
     std::vector<KeyValuePair> results;
     std::unordered_set<uint64_t> batch_opened, batch_closed, batch_has_entries;
 
+    if (checkpoint_batch_ts != 0)
+        batch_opened.insert(checkpoint_batch_ts);
+
     pos = static_cast<size_t>(last_checkpoint_end);
-    auto ReadUint64From = [](const unsigned char* d) -> uint64_t {
-        return static_cast<uint64_t>(d[0]) | (static_cast<uint64_t>(d[1]) << 8)
-             | (static_cast<uint64_t>(d[2]) << 16) | (static_cast<uint64_t>(d[3]) << 24)
-             | (static_cast<uint64_t>(d[4]) << 32) | (static_cast<uint64_t>(d[5]) << 40)
-             | (static_cast<uint64_t>(d[6]) << 48) | (static_cast<uint64_t>(d[7]) << 56);
-    };
     while (pos + 4 <= file_data.size()) {
         size_t record_start = pos;
 

@@ -29,7 +29,7 @@ public:
     void BufferBatchCommit(uint64_t batch_ts);
     void BufferAbort(uint64_t batch_ts);
 
-    void WriteCheckpoint(uint64_t timestamp);
+    void WriteCheckpoint(uint64_t timestamp, uint64_t batch_ts = 0);
 
     size_t Sync();
 

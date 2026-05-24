@@ -97,7 +97,7 @@ void LSMTreeEngine::FlushWorkerLoop() {
         if (to_flush && to_flush->EntryCount() > 0) {
             try {
                 DoFlush(to_flush);
-                wal_->WriteCheckpoint(global_ts_.load());
+                wal_->WriteCheckpoint(global_ts_.load(), batch_in_progress_ ? batch_ts_ : 0);
                 DeferRecycle(std::move(to_flush));
                 DrainRecyclePending();
             } catch (...) {}
@@ -264,7 +264,7 @@ LSMTreeEngine::~LSMTreeEngine() {
             auto frozen = active_memtable_;
             active_memtable_.reset();
             DoFlush(frozen);
-            wal_->WriteCheckpoint(global_ts_.load());
+            wal_->WriteCheckpoint(global_ts_.load(), batch_in_progress_ ? batch_ts_ : 0);
             wal_->Sync();
         }
         DrainFileGC();
@@ -297,7 +297,7 @@ void LSMTreeEngine::RecoverFromWAL() {
             frozen->Freeze();
             active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_);
             DoFlush(frozen);
-            wal_->WriteCheckpoint(global_ts_.load());
+            wal_->WriteCheckpoint(global_ts_.load(), batch_in_progress_ ? batch_ts_ : 0);
         }
     }
 
@@ -308,7 +308,7 @@ void LSMTreeEngine::RecoverFromWAL() {
         DoFlush(frozen);
     }
 
-    wal_->WriteCheckpoint(global_ts_.load());
+    wal_->WriteCheckpoint(global_ts_.load(), batch_in_progress_ ? batch_ts_ : 0);
     wal_->Sync();
 }
 
