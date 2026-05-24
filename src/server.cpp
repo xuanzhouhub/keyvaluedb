@@ -233,32 +233,27 @@ void Server::HandleClient(socket_t client_sock) {
             value.resize(value_len);
             if (!RecvAll(client_sock, &value[0], value_len)) break;
 
-            bool is_delete = value.empty();
-
-            WriteRequest req;
-            req.key = std::move(key);
-            req.value = std::move(value);
-            req.is_delete = is_delete;
-            req.client_sock = client_sock;
-            auto future = req.promise.get_future();
-
             {
                 std::unique_lock<std::mutex> lock(write_queue_mutex_);
-                size_t req_size = req.key.size() + req.value.size() + 64;
+                size_t req_size = key.size() + value.size() + 64;
                 write_queue_not_full_cv_.wait(lock, [this, req_size] {
                     return batch_queue_bytes_ + req_size <= max_queue_bytes_
                         || should_stop_.load();
                 });
                 if (should_stop_.load()) break;
                 batch_queue_bytes_ += req_size;
-                batch_queue_.push(std::move(req));
+                WriteRequest wreq;
+                wreq.key = std::move(key);
+                wreq.value = std::move(value);
+                wreq.is_delete = value.empty();
+                wreq.is_batch = true;
+                wreq.client_sock = client_sock;
+                batch_queue_.push(std::move(wreq));
             }
             write_queue_cv_.notify_one();
 
-            bool result = future.get();
-            unsigned char resp = result ? Protocol::kOkResp : Protocol::kErrorResp;
+            unsigned char resp = Protocol::kOkResp;
             SendAll(client_sock, &resp, 1);
-            if (!result) SendString(client_sock, "batch write failed");
 
         } else if (req_type == Protocol::kBatchBeginReq) {
             bool started = engine_.StartBatch();
@@ -267,10 +262,21 @@ void Server::HandleClient(socket_t client_sock) {
             if (!started) SendString(client_sock, "batch already in progress");
 
         } else if (req_type == Protocol::kBatchCommitReq) {
-            bool committed = engine_.CommitBatch();
-            unsigned char resp = committed ? Protocol::kOkResp : Protocol::kErrorResp;
+            {
+                std::lock_guard<std::mutex> lock(write_queue_mutex_);
+                batch_commit_pending_ = true;
+            }
+            write_queue_cv_.notify_one();
+
+            {
+                std::unique_lock<std::mutex> lock(write_queue_mutex_);
+                batch_commit_done_cv_.wait(lock, [this] {
+                    return !batch_commit_pending_ || should_stop_.load();
+                });
+            }
+
+            unsigned char resp = Protocol::kOkResp;
             SendAll(client_sock, &resp, 1);
-            if (!committed) SendString(client_sock, "no batch in progress");
 
         } else if (req_type == Protocol::kRangeScanReq) {
             RangeBound lower, upper;
@@ -313,45 +319,96 @@ void Server::HandleClient(socket_t client_sock) {
 }
 
 void Server::WriterLoop() {
+    auto resolvePromise = [](WriteRequest& req, bool ok) {
+        try { req.promise.set_value(ok); } catch (...) {}
+    };
+
     while (true) {
-        WriteRequest req;
-        bool from_batch = false;
         {
             std::unique_lock<std::mutex> lock(write_queue_mutex_);
             write_queue_cv_.wait(lock, [this] {
-                return !write_queue_.empty() || !batch_queue_.empty() || should_stop_.load();
+                return !write_queue_.empty() || !batch_queue_.empty()
+                    || batch_commit_pending_ || should_stop_.load();
             });
-
-            if (should_stop_.load() && write_queue_.empty() && batch_queue_.empty()) {
-                break;
-            }
-
-            if (!write_queue_.empty()) {
-                req = std::move(write_queue_.front());
-                write_queue_.pop();
-                queue_bytes_ -= (req.key.size() + req.value.size());
-            } else if (!batch_queue_.empty()) {
-                req = std::move(batch_queue_.front());
-                batch_queue_.pop();
-                from_batch = true;
-                batch_queue_bytes_ -= (req.key.size() + req.value.size());
-            }
         }
 
+        bool stop = false;
+        {
+            std::lock_guard<std::mutex> lock(write_queue_mutex_);
+            if (should_stop_.load() && write_queue_.empty()
+                && batch_queue_.empty() && !batch_commit_pending_)
+                stop = true;
+        }
+        if (stop) break;
+
+        WriteRequest normal_req;
+        bool has_normal = false;
+        {
+            std::lock_guard<std::mutex> lock(write_queue_mutex_);
+            if (!write_queue_.empty() && !batch_commit_pending_) {
+                normal_req = std::move(write_queue_.front());
+                write_queue_.pop();
+                queue_bytes_ -= (normal_req.key.size() + normal_req.value.size());
+                has_normal = true;
+            }
+        }
+        if (has_normal) {
+            write_queue_not_full_cv_.notify_one();
+            try {
+                if (normal_req.is_delete)
+                    engine_.Delete(normal_req.key);
+                else
+                    engine_.Insert(normal_req.key, normal_req.value);
+                resolvePromise(normal_req, true);
+            } catch (const std::exception&) {
+                resolvePromise(normal_req, false);
+            }
+            continue;
+        }
+
+        bool trigger = false;
+        bool commit_mode = false;
+        std::vector<WriteRequest> mini;
+        {
+            std::lock_guard<std::mutex> lock(write_queue_mutex_);
+            trigger = (batch_queue_.size() >= mini_batch_size_)
+                   || (batch_queue_bytes_ >= max_queue_bytes_ / 2)
+                   || batch_commit_pending_;
+            if (!trigger) continue;
+
+            commit_mode = batch_commit_pending_;
+            size_t limit = commit_mode ? SIZE_MAX : mini_batch_size_;
+            while (!batch_queue_.empty() && mini.size() < limit) {
+                auto& front = batch_queue_.front();
+                batch_queue_bytes_ -= (front.key.size() + front.value.size());
+                mini.push_back(std::move(front));
+                batch_queue_.pop();
+            }
+        }
         write_queue_not_full_cv_.notify_one();
 
         try {
-            if (from_batch) {
-                if (req.is_delete) engine_.BatchDelete(req.key);
-                else engine_.BatchInsert(req.key, req.value);
-            } else {
-                if (req.is_delete) engine_.Delete(req.key);
-                else engine_.Insert(req.key, req.value);
+            for (auto& r : mini) {
+                if (r.is_delete)
+                    engine_.BatchDelete(r.key);
+                else
+                    engine_.BatchInsert(r.key, r.value);
             }
-            req.promise.set_value(true);
-        } catch (const std::exception&) {
-            req.promise.set_value(false);
+        } catch (...) {
+            for (auto& r : mini) resolvePromise(r, false);
+            continue;
         }
+
+        if (commit_mode) {
+            engine_.CommitBatch();
+            {
+                std::lock_guard<std::mutex> lock(write_queue_mutex_);
+                batch_commit_pending_ = false;
+            }
+            batch_commit_done_cv_.notify_all();
+        }
+
+        for (auto& r : mini) resolvePromise(r, true);
     }
 }
 

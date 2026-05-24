@@ -50,6 +50,7 @@ struct Config {
     static constexpr size_t kDefaultBlockCacheMeta    = 256;
     static constexpr size_t kDefaultBlockCacheBytes   = 64 * 1024 * 1024;
     static constexpr uint64_t kDefaultBatchIncrementGap = 1'000'000;
+    static constexpr size_t kDefaultMiniBatchSize  = 1000;
 };
 
 } // namespace kvdb
