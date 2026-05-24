@@ -294,6 +294,11 @@ void TestClientRangeScanExclusive() {
     Cleanup();
 }
 
+void TestClientRangeScanExclusive();
+void TestClientCompareAndSwap();
+void TestClientCASFail();
+void TestClientCASOnNewKey();
+
 void RunTests() {
     std::cout << "Running Server Tests...\n\n";
 
@@ -307,6 +312,76 @@ void RunTests() {
     TestClientRangeScan();
     TestClientPrefixScan();
     TestClientRangeScanExclusive();
+    TestClientCompareAndSwap();
+    TestClientCASFail();
+    TestClientCASOnNewKey();
+}
+
+void TestClientCompareAndSwap() {
+    Cleanup();
+    {
+        kvdb::LSMTreeEngine engine(kTestDir, 1024 * 1024);
+        kvdb::Server server(engine, kTestPort);
+        server.Start();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        kvdb::Client c;
+        ASSERT_TRUE(c.Connect("127.0.0.1", kTestPort));
+        ASSERT_TRUE(c.Write("cas_key", "v1"));
+        ASSERT_TRUE(c.CompareAndSwap("cas_key", "v1", "v2"));
+
+        std::string v;
+        ASSERT_TRUE(c.Read("cas_key", v));
+        ASSERT_STREQ("v2", v);
+
+        c.Disconnect();
+        server.Stop();
+    }
+    Cleanup();
+}
+
+void TestClientCASFail() {
+    Cleanup();
+    {
+        kvdb::LSMTreeEngine engine(kTestDir, 1024 * 1024);
+        kvdb::Server server(engine, kTestPort);
+        server.Start();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        kvdb::Client c;
+        ASSERT_TRUE(c.Connect("127.0.0.1", kTestPort));
+        ASSERT_TRUE(c.Write("cf_key", "val1"));
+        ASSERT_FALSE(c.CompareAndSwap("cf_key", "wrong", "val2"));
+
+        std::string v;
+        ASSERT_TRUE(c.Read("cf_key", v));
+        ASSERT_STREQ("val1", v);
+
+        c.Disconnect();
+        server.Stop();
+    }
+    Cleanup();
+}
+
+void TestClientCASOnNewKey() {
+    Cleanup();
+    {
+        kvdb::LSMTreeEngine engine(kTestDir, 1024 * 1024);
+        kvdb::Server server(engine, kTestPort);
+        server.Start();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        kvdb::Client c;
+        ASSERT_TRUE(c.Connect("127.0.0.1", kTestPort));
+        ASSERT_FALSE(c.CompareAndSwap("newkey", "any", "val"));
+
+        std::string v;
+        ASSERT_FALSE(c.Read("newkey", v));
+
+        c.Disconnect();
+        server.Stop();
+    }
+    Cleanup();
 }
 
 } // namespace kvdb_test

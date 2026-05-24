@@ -168,7 +168,8 @@ keyvaluedb/
 ## Pending Steps (DO NOT start unless user explicitly asks)
 | Step | Feature | Status |
 |------|---------|--------|
-| 8  | Batch Write — dual queues, gap-based timestamps, sequential batches | **In progress** |
+| 8  | Batch Write — dual queues, gap-based timestamps, sequential batches | **Done** |
+| — | Compare-And-Swap — non-blocking, same-key serial skip, async read | **Done** |
 | 9  | Cache sharding — 16-partition mutex like LevelDB | **Done** |
 
 ### Batch Write (Step 8, in progress)
