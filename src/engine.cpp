@@ -839,6 +839,7 @@ bool LSMTreeEngine::CommitBatch() {
     if (!batch_in_progress_) return false;
 
     wal_->BufferBatchCommit(batch_ts_);
+    wal_->Sync();
 
     global_ts_.store(batch_ts_ + 1);
     batch_in_progress_ = false;
@@ -853,6 +854,7 @@ bool LSMTreeEngine::AbortBatch() {
 
     if (batch_touched_) {
         wal_->BufferAbort(batch_ts_);
+        wal_->Sync();
 
         {
             std::unique_lock<std::shared_mutex> mlock(memtable_mutex_);
