@@ -118,6 +118,7 @@ private:
     uint64_t batch_increment_gap_ = Config::kDefaultBatchIncrementGap;
     bool batch_in_progress_ = false;
     uint64_t batch_ts_ = 0;
+    bool batch_touched_ = false;
 
     std::unique_ptr<WAL> wal_;
     std::unique_ptr<Manifest> manifest_;

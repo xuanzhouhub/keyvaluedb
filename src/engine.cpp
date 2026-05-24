@@ -827,6 +827,7 @@ bool LSMTreeEngine::StartBatch() {
     if (batch_in_progress_) return false;
     batch_ts_ = global_ts_.load() + batch_increment_gap_;
     batch_in_progress_ = true;
+    batch_touched_ = false;
     return true;
 }
 
@@ -844,19 +845,21 @@ bool LSMTreeEngine::AbortBatch() {
     std::unique_lock<std::mutex> lock(batch_mutex_);
     if (!batch_in_progress_) return false;
 
-    wal_->BufferAbort(batch_ts_);
+    if (batch_touched_) {
+        wal_->BufferAbort(batch_ts_);
 
-    {
-        std::unique_lock<std::shared_mutex> mlock(memtable_mutex_);
-        active_memtable_->AddAbortedBatch(batch_ts_);
-        for (auto& m : frozen_memtables_)
-            m->AddAbortedBatch(batch_ts_);
-    }
+        {
+            std::unique_lock<std::shared_mutex> mlock(memtable_mutex_);
+            active_memtable_->AddAbortedBatch(batch_ts_);
+            for (auto& m : frozen_memtables_)
+                m->AddAbortedBatch(batch_ts_);
+        }
 
-    {
-        std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
-        for (auto& meta : sstable_metadata_)
-            meta.aborted_batch_ts.insert(batch_ts_);
+        {
+            std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+            for (auto& meta : sstable_metadata_)
+                meta.aborted_batch_ts.insert(batch_ts_);
+        }
     }
 
     batch_in_progress_ = false;
@@ -871,6 +874,8 @@ void LSMTreeEngine::BatchInsert(const std::string& key, const std::string& value
     size_t entry_size = key.size() + value.size() + Config::kMemTableEntryOverheadBytes;
     if (entry_size > Config::kMaxKeyValuePairBytes)
         throw std::invalid_argument("KV pair too large for batch");
+
+    batch_touched_ = true;
 
     {
         std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
@@ -892,6 +897,8 @@ void LSMTreeEngine::BatchInsert(const std::string& key, const std::string& value
 void LSMTreeEngine::BatchDelete(const std::string& key) {
     if (key.size() > Config::kMaxKeyBytes)
         throw std::invalid_argument("Key too large for batch");
+
+    batch_touched_ = true;
 
     {
         std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
