@@ -8,8 +8,9 @@
 
 namespace kvdb {
 
-SSTableIterator::SSTableIterator(const std::string& filepath)
-    : reader_(nullptr), manifest_seq_(0) {
+SSTableIterator::SSTableIterator(const std::string& filepath,
+                                 const std::unordered_set<uint64_t>* aborted)
+    : reader_(nullptr), manifest_seq_(0), aborted_(aborted) {
     file.open(filepath, std::ios::binary);
     if (!file.is_open()) { total_entries = 0; return; }
     read_u32(); read_u32(); read_u32();
@@ -21,9 +22,10 @@ SSTableIterator::SSTableIterator(const std::string& filepath)
 SSTableIterator::SSTableIterator(const std::string& filepath,
                                  BlockReader& reader,
                                  uint64_t manifest_seq,
-                                 bool populate)
+                                 bool populate,
+                                 const std::unordered_set<uint64_t>* aborted)
     : filepath_(filepath), reader_(&reader), manifest_seq_(manifest_seq),
-      populate_(populate) {
+      populate_(populate), aborted_(aborted) {
     file.open(filepath, std::ios::binary);
     if (!file.is_open()) { total_entries = 0; return; }
     read_u32(); read_u32(); read_u32();
@@ -42,22 +44,32 @@ void SSTableIterator::ReadNextBlock() {
             read_entries += block_.Count();
             ++cur_block_;
             block_.Seek(0); block_.Read(current);
+            while (aborted_ && aborted_->count(current.timestamp)) {
+                ++pos;
+                if (pos >= block_.Count()) break;
+                block_.Seek(pos); block_.Read(current);
+            }
             return;
         }
     }
-    cached_block_.reset();
-    read_u32();
-    uint8_t comp = uint8_t(file.get());
-    uint32_t csz = read_u32();
-    block_data.resize(csz); file.read(&block_data[0], csz);
-    DecompressBlock(comp, block_data);
-    block_ = Block(block_data);
-    read_entries += block_.Count();
-    ++cur_block_;
-    block_.Seek(0); block_.Read(current);
-    if (populate_ && reader_ && manifest_seq_ != 0)
-        reader_->PutBlock(manifest_seq_, cur_block_ - 1, block_data);
-}
+        cached_block_.reset();
+        read_u32();
+        uint8_t comp = uint8_t(file.get());
+        uint32_t csz = read_u32();
+        block_data.resize(csz); file.read(&block_data[0], csz);
+        DecompressBlock(comp, block_data);
+        block_ = Block(block_data);
+        read_entries += block_.Count();
+        ++cur_block_;
+        block_.Seek(0); block_.Read(current);
+        while (aborted_ && aborted_->count(current.timestamp)) {
+            ++pos;
+            if (pos >= block_.Count()) break;
+            block_.Seek(pos); block_.Read(current);
+        }
+        if (populate_ && reader_ && manifest_seq_ != 0)
+            reader_->PutBlock(manifest_seq_, cur_block_ - 1, block_data);
+    }
 
 void SSTableIterator::DecompressBlock(uint8_t comp, std::string& data) {
     if (comp == Config::kCompressionSnappy) {

@@ -143,6 +143,7 @@ void SSTable::Write(const std::string& filepath, const std::vector<KeyValuePair>
     auto&bd=bloom.Data(); WriteUint32LE(file,static_cast<uint32_t>(bloom.BitCount()));
     WriteUint32LE(file,bloom.HashCount()); WriteUint32LE(file,static_cast<uint32_t>(bd.size()));
     file.write(reinterpret_cast<const char*>(bd.data()),static_cast<std::streamsize>(bd.size()));
+    WriteUint32LE(file, 0);  // aborted_count = 0 (Write() path has no aborted batches)
     WriteUint32LE(file,static_cast<uint32_t>(offsets.size()));
     for(auto o:offsets)WriteUint64LE(file,o);
     for(auto&fk:first_keys){uint16_t kl=static_cast<uint16_t>(fk.size());file.put(char(kl&0xFF));file.put(char((kl>>8)&0xFF));file.write(fk.data(),kl);}
@@ -163,7 +164,8 @@ void SSTable::Write(const std::string& filepath, const std::vector<KeyValuePair>
 
 void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk& walk,
                             size_t entry_count, BlockReader* cache,
-                            uint64_t manifest_seq) {
+                            uint64_t manifest_seq,
+                            const std::unordered_set<uint64_t>* aborted) {
     BloomFilter bloom(entry_count > 0 ? entry_count : 1, 0.01);
     BlockBuilder builder(Config::kSSTableBlockSize);
     struct BlockData { std::vector<char> data; std::string first_key; std::string uncompressed; };
@@ -237,6 +239,12 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
     WriteUint32LE(file, bloom.HashCount());
     WriteUint32LE(file, static_cast<uint32_t>(bdata.size()));
     file.write(reinterpret_cast<const char*>(bdata.data()), static_cast<std::streamsize>(bdata.size()));
+    if (aborted) {
+        WriteUint32LE(file, static_cast<uint32_t>(aborted->size()));
+        for (uint64_t ts : *aborted) WriteUint64LE(file, ts);
+    } else {
+        WriteUint32LE(file, 0);
+    }
     WriteUint32LE(file, static_cast<uint32_t>(blocks.size()));
     for (auto o : offsets) WriteUint64LE(file, o);
     for (auto& fk : fkeys) {
@@ -289,6 +297,9 @@ SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
     if(maxkl>0){meta.max_key.resize(maxkl);file.read(&meta.max_key[0],maxkl);}
     uint32_t bb=ReadUint32LE(file),bh=ReadUint32LE(file),bz=ReadUint32LE(file);
     if(bz>0){std::vector<uint8_t> bd(bz);file.read(reinterpret_cast<char*>(bd.data()),bz);meta.bloom=BloomFilter::FromRaw(bd.data(),bb,bh);}
+    uint32_t aborted_count = ReadUint32LE(file);
+    for (uint32_t i = 0; i < aborted_count; ++i)
+        meta.aborted_batch_ts.insert(ReadUint64LE(file));
     uint32_t bc=ReadUint32LE(file); meta.block_offsets.resize(bc);
     for(uint32_t i=0;i<bc;++i)meta.block_offsets[i]=ReadUint64LE(file);
     meta.block_first_keys.resize(bc);
@@ -346,6 +357,7 @@ bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
         for (uint32_t i = 0; i < blk.Count(); ++i) {
             blk.Seek(i);
             if (!blk.Read(kv)) break;
+            if (meta.aborted_batch_ts.count(kv.timestamp)) continue;
             if (kv.key == key && kv.timestamp <= read_ts) {
                 if (kv.is_tombstone) { value_out.clear(); return true; }
                 value_out = std::move(kv.value);

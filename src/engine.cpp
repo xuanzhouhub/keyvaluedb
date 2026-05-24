@@ -191,6 +191,7 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
                     meta.bloom = std::move(full.bloom);
                     meta.block_offsets = std::move(full.block_offsets);
                     meta.block_first_keys = std::move(full.block_first_keys);
+                    meta.aborted_batch_ts = std::move(full.aborted_batch_ts);
                 } catch (...) {}
             }
         }
@@ -623,7 +624,7 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
             if (meta.level == 0) {
                 try {
                     auto iter = std::make_unique<SSTableIterator>(meta.filepath,
-                        *sst_cache_, meta.manifest_seq);
+                        *sst_cache_, meta.manifest_seq, true, &meta.aborted_batch_ts);
                     if (iter->Valid()) {
                         if (!lower.IsUnbounded()) iter->SeekToKey(lower.key);
                         if (iter->Valid()) sources.push_back(std::move(iter));
@@ -673,7 +674,8 @@ void LSMTreeEngine::DoFlush(std::shared_ptr<MemTable> frozen_memtable) {
 
     size_t entry_count = frozen_memtable->EntryCount();
     auto walk = BPlusTree::MemTableWalk(frozen_memtable->GetTree());
-    SSTable::WriteFromWalk(filepath, walk, entry_count, sst_cache_.get(), seq);
+    SSTable::WriteFromWalk(filepath, walk, entry_count, sst_cache_.get(), seq,
+                           &frozen_memtable->AbortedBatches());
 
     SSTable::Metadata meta;
     try {

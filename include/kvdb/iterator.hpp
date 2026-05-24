@@ -15,6 +15,7 @@
 #include <queue>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace kvdb {
@@ -73,12 +74,16 @@ struct SSTableIterator : SourceIterator {
     uint32_t cur_block_ = 0;
     bool populate_ = true;
     std::string filepath_;
+    const std::unordered_set<uint64_t>* aborted_ = nullptr;
 
-    SSTableIterator(const std::string& filepath);
+    SSTableIterator(const std::string& filepath,
+                    const std::unordered_set<uint64_t>* aborted = nullptr);
+
     SSTableIterator(const std::string& filepath,
                     BlockReader& reader,
                     uint64_t manifest_seq,
-                    bool populate = true);
+                    bool populate = true,
+                    const std::unordered_set<uint64_t>* aborted = nullptr);
 
     ~SSTableIterator() { if (file.is_open()) file.close(); }
 
@@ -87,9 +92,11 @@ struct SSTableIterator : SourceIterator {
     const KeyValuePair& Current() const override { return current; }
 
     void Next() override {
-        ++pos;
-        if (pos >= block_.Count()) ReadNextBlock();
-        else { block_.Seek(pos); block_.Read(current); }
+        do {
+            ++pos;
+            if (pos >= block_.Count()) { ReadNextBlock(); return; }
+            else { block_.Seek(pos); block_.Read(current); }
+        } while (aborted_ && aborted_->count(current.timestamp));
     }
 
 private:
@@ -136,8 +143,8 @@ public:
 private:
     std::unique_ptr<SSTableIterator> MakeIter(const SSTable::Metadata& m) {
         if (reader_)
-            return std::make_unique<SSTableIterator>(m.filepath, *reader_, m.manifest_seq);
-        return std::make_unique<SSTableIterator>(m.filepath);
+            return std::make_unique<SSTableIterator>(m.filepath, *reader_, m.manifest_seq, true, &m.aborted_batch_ts);
+        return std::make_unique<SSTableIterator>(m.filepath, &m.aborted_batch_ts);
     }
 
     void OpenNext() {

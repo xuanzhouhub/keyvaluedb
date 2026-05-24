@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace kvdb {
@@ -16,7 +17,8 @@ public:
     static void Write(const std::string& filepath, const std::vector<KeyValuePair>& entries);
     static void WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk& walk,
                               size_t entry_count, BlockReader* cache = nullptr,
-                              uint64_t manifest_seq = 0);
+                              uint64_t manifest_seq = 0,
+                              const std::unordered_set<uint64_t>* aborted = nullptr);
 
     struct Metadata {
         std::string filepath;
@@ -32,6 +34,7 @@ public:
         BloomFilter bloom;
         std::vector<uint64_t> block_offsets;
         std::vector<std::string> block_first_keys;
+        std::unordered_set<uint64_t> aborted_batch_ts;
     };
 
     static bool LookupKey(const std::string& filepath, const std::string& key,
