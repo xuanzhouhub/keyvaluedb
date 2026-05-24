@@ -828,12 +828,26 @@ void TestBatchAbortAfterFlush() {
     {
         kvdb::LSMTreeEngine engine("./test_batch_data6", 4096, 2, 16, 16, 100);
         ASSERT_TRUE(engine.StartBatch());
+
         engine.BatchInsert("ab_1", "v1");
         engine.BatchInsert("ab_2", "v2");
-        engine.AbortBatch();
 
         engine.Flush();
         engine.WaitForPendingFlushes();
+
+        auto metas = engine.GetSSTableMetadata();
+        ASSERT_TRUE(!metas.empty());
+
+        bool found_raw_ab1 = false;
+        for (auto& m : metas) {
+            auto entries = kvdb::SSTable::ReadAll(m.filepath);
+            for (auto& e : entries) {
+                if (e.key == "ab_1" && e.value == "v1") found_raw_ab1 = true;
+            }
+        }
+        ASSERT_TRUE(found_raw_ab1);
+
+        engine.AbortBatch();
 
         engine.Insert("normal", "nv");
 

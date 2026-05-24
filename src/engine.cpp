@@ -853,6 +853,12 @@ bool LSMTreeEngine::AbortBatch() {
             m->AddAbortedBatch(batch_ts_);
     }
 
+    {
+        std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+        for (auto& meta : sstable_metadata_)
+            meta.aborted_batch_ts.insert(batch_ts_);
+    }
+
     batch_in_progress_ = false;
     lock.unlock();
     batch_cv_.notify_all();
