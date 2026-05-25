@@ -368,37 +368,8 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
     LeafPage* leaf = FindLeafForWrite(key, path, indices);
     uint32_t pos;
     bool large = (value.size() > kPageSize / 2);
-
-    if (leaf->Find(key, pos)) {
-        size_t es = key.size() + value.size() + Config::kMemTableEntryOverheadBytes;
-
-        LeafPage* nleaf = NewLeaf();
-        CopyLeafContent(nleaf, leaf);
-        if (nleaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone)) {
-            while (!TryLock(leaf->version)) {}
-            if (!path.empty())
-                path.back()->child_leaves[indices.back()] = nleaf;
-            else { auto* nr = NewInternal(); nr->child_leaves.push_back(nleaf); root_ = nr; }
-            if (first_leaf_ == leaf) first_leaf_ = nleaf;
-            UnlockAndBump(leaf->version);
-            RetireLeaf(leaf);
-            memory_usage_ += es;
-            return;
-        }
-
-        while (!TryLock(leaf->version)) {}
-        if (!leaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone)) {
-            UnlockAndBump(leaf->version);
-            SplitLeaf(leaf, path.back(), indices.back(), path, indices);
-            leaf = FindLeafForWrite(key, path, indices);
-            leaf->Find(key, pos);
-            while (!TryLock(leaf->version)) {}
-            leaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone);
-        }
-        UnlockAndBump(leaf->version);
-        memory_usage_ += es;
-        return;
-    }
+    bool found = leaf->Find(key, pos);
+    size_t es = key.size() + value.size() + Config::kMemTableEntryOverheadBytes;
 
     LeafPage* nleaf = NewLeaf();
     CopyLeafContent(nleaf, leaf);
@@ -410,8 +381,8 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
         if (first_leaf_ == leaf) first_leaf_ = nleaf;
         UnlockAndBump(leaf->version);
         RetireLeaf(leaf);
-        count_++;
-        memory_usage_ += key.size() + value.size() + Config::kMemTableEntryOverheadBytes;
+        if (!found) count_++;
+        memory_usage_ += es;
         return;
     }
 
@@ -425,8 +396,8 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
         leaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone);
     }
     UnlockAndBump(leaf->version);
-    count_++;
-    memory_usage_ += key.size() + value.size() + Config::kMemTableEntryOverheadBytes;
+    if (!found) count_++;
+    memory_usage_ += es;
 }
 inline bool BPlusTree::Lookup(const std::string& key, uint64_t read_ts, std::string& value_out) const {
     for (;;) {
