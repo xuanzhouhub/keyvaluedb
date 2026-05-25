@@ -28,7 +28,7 @@ public:
         uint32_t _pad        = 0;
         LeafPage* next       = nullptr;
         char     data[4064];
-        uint64_t version = 0;
+        std::atomic<uint64_t> version{0};
 
         static constexpr size_t kSlotSize = 14;
         static constexpr uint32_t kSlotBase = 24;
@@ -76,7 +76,7 @@ public:
         std::vector<std::string> keys;
         std::vector<InternalNode*> children;
         std::vector<LeafPage*> child_leaves;
-        uint64_t version = 0;
+        std::atomic<uint64_t> version{0};
 
         InternalNode() {
             keys.reserve(kInternalFanout);
@@ -94,20 +94,17 @@ public:
     BPlusTree();
     ~BPlusTree();
 
-    static uint64_t ReadVersion(const uint64_t& v) {
-        return reinterpret_cast<const std::atomic<uint64_t>&>(v).load(std::memory_order_acquire);
-    }
+    static uint64_t ReadVersion(const std::atomic<uint64_t>& v) { return v.load(std::memory_order_acquire); }
     static bool IsLocked(uint64_t ver) { return (ver & 1) != 0; }
-    static bool TryLock(uint64_t& v) {
-        auto& av = reinterpret_cast<std::atomic<uint64_t>&>(v);
-        uint64_t expected = av.load(std::memory_order_acquire);
+    static bool TryLock(std::atomic<uint64_t>& v) {
+        uint64_t expected = v.load(std::memory_order_acquire);
         if (IsLocked(expected)) return false;
-        return av.compare_exchange_weak(expected, expected | 1,
-                                         std::memory_order_acquire,
-                                         std::memory_order_relaxed);
+        return v.compare_exchange_weak(expected, expected | 1,
+                                        std::memory_order_acquire,
+                                        std::memory_order_relaxed);
     }
-    static void UnlockAndBump(uint64_t& v) {
-        reinterpret_cast<std::atomic<uint64_t>&>(v).fetch_add(1, std::memory_order_release);
+    static void UnlockAndBump(std::atomic<uint64_t>& v) {
+        v.fetch_add(1, std::memory_order_release);
     }
 
     void Insert(const std::string& key, const std::string& value, uint64_t timestamp, bool is_tombstone = false);
@@ -295,6 +292,8 @@ inline BPlusTree::LeafPage* BPlusTree::FindLeafForWrite(
 inline void BPlusTree::SplitLeaf(
     LeafPage* leaf, InternalNode* parent, uint32_t child_idx,
     std::vector<InternalNode*>& path, std::vector<uint32_t>& indices) {
+    while (!TryLock(leaf->version)) {}
+    while (!TryLock(parent->version)) {}
     LeafPage* nl = NewLeaf();
     uint32_t mid = leaf->count / 2;
     for (uint32_t i = mid; i < leaf->count; ++i) {
@@ -322,10 +321,13 @@ inline void BPlusTree::SplitLeaf(
         parent->children.begin() + static_cast<ptrdiff_t>(child_idx) + 1, nullptr);
     parent->keys.insert(
         parent->keys.begin() + static_cast<ptrdiff_t>(child_idx), sep);
+    UnlockAndBump(parent->version);
+    UnlockAndBump(leaf->version);
     if (parent->keys.size() >= kInternalFanout) SplitInternal(parent, path, indices);
 }
 inline void BPlusTree::SplitInternal(
     InternalNode* node, std::vector<InternalNode*>& path, std::vector<uint32_t>& indices) {
+    while (!TryLock(node->version)) {}
     InternalNode* nn = NewInternal();
     uint32_t mid = node->keys.size() / 2;
     std::string mid_key = node->keys[mid];
@@ -343,11 +345,15 @@ inline void BPlusTree::SplitInternal(
         nr->children.push_back(node); nr->child_leaves.push_back(nullptr);
         nr->children.push_back(nn); nr->child_leaves.push_back(nullptr);
         root_ = nr;
+        UnlockAndBump(node->version);
     } else {
         InternalNode* p = path[path.size()-2]; uint32_t idx = indices[indices.size()-2];
+        while (!TryLock(p->version)) {}
         p->keys.insert(p->keys.begin() + static_cast<ptrdiff_t>(idx), mid_key);
         p->children.insert(p->children.begin() + static_cast<ptrdiff_t>(idx) + 1, nn);
         p->child_leaves.insert(p->child_leaves.begin() + static_cast<ptrdiff_t>(idx) + 1, nullptr);
+        UnlockAndBump(p->version);
+        UnlockAndBump(node->version);
         if (p->keys.size() >= kInternalFanout) { path.pop_back(); indices.pop_back(); SplitInternal(p, path, indices); }
     }
 }
