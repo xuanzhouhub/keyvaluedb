@@ -98,6 +98,17 @@ struct InternalNode {
         std::vector<std::string> keys;
         StaticVec<InternalNode*, kInternalFanout + 1> children;
         StaticVec<LeafPage*, kInternalFanout + 1> child_leaves;
+
+        uint8_t KeyCount() const { return static_cast<uint8_t>(keys.size()); }
+        void AssignKeysFrom(std::vector<std::string>& src) { keys.swap(src); }
+        void CopyKeysTo(std::vector<std::string>& dst) const { dst = keys; }
+        const std::string& KeyRef(uint8_t i) const { return keys[i]; }
+        void InsKey(uint8_t pos, const std::string& k) { keys.insert(keys.begin()+pos, k); }
+        void PushKey(const std::string& k) { keys.push_back(k); }
+        void ResizeKeys(uint8_t n) { keys.resize(n); }
+        void AssignKeys(const std::vector<std::string>& src, uint8_t start, uint8_t end) {
+            for (uint8_t i = start; i < end; ++i) keys.push_back(src[i]);
+        }
     };
         Store s;
         std::atomic<uint64_t> version{0};
@@ -212,7 +223,7 @@ private:
 
         // Phase 2: Build updated parent vectors (no lock)
         auto pchild = parent->s.child_leaves;
-        auto pkeys  = parent->s.keys;
+        auto pkeys = std::vector<std::string>(); parent->s.CopyKeysTo(pkeys);
         auto pchildren = parent->s.children;
         std::string sep(right->Rec(0), right->KeyLen(0));
         pchild[child_idx] = left;
@@ -225,7 +236,7 @@ private:
         InternalNode* anchor_node = nullptr;
         uint32_t anchor_idx = 0;
         auto gpchild = parent->s.child_leaves;   // dummy default
-        auto gpkeys  = parent->s.keys;
+        auto gpkeys = std::vector<std::string>(); parent->s.CopyKeysTo(gpkeys);
         auto gpchildren = parent->s.children;
 
         if (!cascade) {
@@ -234,11 +245,13 @@ private:
             // Phase 3: Build cascade nodes and grandparent vectors (no lock)
             uint32_t cmid = pkeys.size() / 2;
             InternalNode* lnode = NewInternal();
-            lnode->s.keys.assign(pkeys.begin(), pkeys.begin() + static_cast<ptrdiff_t>(cmid));
+            lnode->s.ResizeKeys(0);
+            for (size_t i = 0; i < cmid; ++i) lnode->s.PushKey(pkeys[i]);
             lnode->s.children.assign(pchildren.begin(), pchildren.begin() + static_cast<ptrdiff_t>(cmid) + 1);
             lnode->s.child_leaves.assign(pchild.begin(), pchild.begin() + static_cast<ptrdiff_t>(cmid) + 1);
             InternalNode* rnode = NewInternal();
-            rnode->s.keys.assign(pkeys.begin() + static_cast<ptrdiff_t>(cmid) + 1, pkeys.end());
+            rnode->s.ResizeKeys(0);
+            for (size_t i = cmid + 1; i < pkeys.size(); ++i) rnode->s.PushKey(pkeys[i]);
             rnode->s.children.assign(pchildren.begin() + static_cast<ptrdiff_t>(cmid) + 1, pchildren.end());
             rnode->s.child_leaves.assign(pchild.begin() + static_cast<ptrdiff_t>(cmid) + 1, pchild.end());
             std::string csep = pkeys[cmid];
@@ -247,7 +260,7 @@ private:
                 anchor_node = path[path.size() - 2];
                 anchor_idx = indices[indices.size() - 2];
                 gpchild = anchor_node->s.child_leaves;
-                gpkeys  = anchor_node->s.keys;
+                anchor_node->s.CopyKeysTo(gpkeys);
                 gpchildren = anchor_node->s.children;
                 gpchildren[anchor_idx] = lnode;
                 gpchildren.insert(gpchildren.begin() + static_cast<ptrdiff_t>(anchor_idx) + 1, rnode);
@@ -255,7 +268,7 @@ private:
                 gpkeys.insert(gpkeys.begin() + static_cast<ptrdiff_t>(anchor_idx), csep);
             } else {
                 new_root_node = NewInternal();
-                new_root_node->s.keys.push_back(csep);
+                new_root_node->s.PushKey(csep);
                 new_root_node->s.children.push_back(lnode);
                 new_root_node->s.child_leaves.push_back(nullptr);
                 new_root_node->s.children.push_back(rnode);
@@ -272,13 +285,13 @@ private:
 
         if (!cascade) {
             parent->s.child_leaves = std::move(pchild);
-            parent->s.keys = std::move(pkeys);
+            parent->s.AssignKeysFrom(pkeys);
             parent->s.children = std::move(pchildren);
         } else if (new_root_node) {
             root_ = new_root_node;
         } else {
             anchor_node->s.child_leaves = std::move(gpchild);
-            anchor_node->s.keys = std::move(gpkeys);
+            anchor_node->s.AssignKeysFrom(gpkeys);
             anchor_node->s.children = std::move(gpchildren);
         }
         UnlockAndBump(anchor_node->version);
@@ -468,25 +481,27 @@ inline void BPlusTree::SplitLeaf(
     parent->s.keys.insert(
         parent->s.keys.begin() + static_cast<ptrdiff_t>(child_idx), sep);
     UnlockAndBump(parent->version);
-    if (parent->s.keys.size() >= kInternalFanout) SplitInternal(parent, path, indices);
+    if (parent->s.KeyCount() >= kInternalFanout) SplitInternal(parent, path, indices);
 }
 inline void BPlusTree::SplitInternal(
     InternalNode* node, std::vector<InternalNode*>& path, std::vector<uint32_t>& indices) {
     while (!TryLock(node->version)) {}
     InternalNode* nn = NewInternal();
-    uint32_t mid = node->s.keys.size() / 2;
-    std::string mid_key = node->s.keys[mid];
+    uint32_t mid = node->s.KeyCount() / 2;
+    std::string mid_key = node->s.KeyRef(static_cast<uint8_t>(mid));
 
-    nn->s.keys.assign(node->s.keys.begin() + static_cast<ptrdiff_t>(mid) + 1, node->s.keys.end());
+    nn->s.ResizeKeys(0);
+    for (uint32_t i = mid + 1; i < node->s.KeyCount(); ++i)
+        nn->s.PushKey(node->s.KeyRef(static_cast<uint8_t>(i)));
     nn->s.children.assign(node->s.children.begin() + static_cast<ptrdiff_t>(mid) + 1, node->s.children.end());
     nn->s.child_leaves.assign(node->s.child_leaves.begin() + static_cast<ptrdiff_t>(mid) + 1, node->s.child_leaves.end());
-    node->s.keys.resize(mid);
+    node->s.ResizeKeys(static_cast<uint8_t>(mid));
     node->s.children.resize(mid + 1);
     node->s.child_leaves.resize(mid + 1);
 
     if (path.size() <= 1) {
         InternalNode* nr = NewInternal();
-        nr->s.keys.push_back(mid_key);
+        nr->s.PushKey(mid_key);
         nr->s.children.push_back(node); nr->s.child_leaves.push_back(nullptr);
         nr->s.children.push_back(nn); nr->s.child_leaves.push_back(nullptr);
         root_ = nr;
@@ -494,12 +509,12 @@ inline void BPlusTree::SplitInternal(
     } else {
         InternalNode* p = path[path.size()-2]; uint32_t idx = indices[indices.size()-2];
         while (!TryLock(p->version)) {}
-        p->s.keys.insert(p->s.keys.begin() + static_cast<ptrdiff_t>(idx), mid_key);
+        p->s.InsKey(static_cast<uint8_t>(idx), mid_key);
         p->s.children.insert(p->s.children.begin() + static_cast<ptrdiff_t>(idx) + 1, nn);
         p->s.child_leaves.insert(p->s.child_leaves.begin() + static_cast<ptrdiff_t>(idx) + 1, nullptr);
         UnlockAndBump(p->version);
         UnlockAndBump(node->version);
-        if (p->s.keys.size() >= kInternalFanout) { path.pop_back(); indices.pop_back(); SplitInternal(p, path, indices); }
+        if (p->s.KeyCount() >= kInternalFanout) { path.pop_back(); indices.pop_back(); SplitInternal(p, path, indices); }
     }
 }
 inline void BPlusTree::Insert(const std::string& key, const std::string& value, uint64_t timestamp, bool is_tombstone) {
