@@ -233,7 +233,7 @@ private:
         std::memcpy(dst->data, src->data, 4072);
     }
 
-    // Unified split: prepare entire sub-tree, then one lock + swap
+    // Unified split: prepare entire sub-tree, replace pointer in parent
     void SplitCoW(LeafPage* leaf,
                   std::vector<InternalNode*>& path, std::vector<uint32_t>& indices,
                   const std::string& key, const std::string& value, uint64_t ts,
@@ -256,14 +256,15 @@ private:
         right->next = leaf->next;
         std::string sep(right->Rec(0), right->KeyLen(0));
 
-        // ---- ASCEND: prepare at each level (no locks) ----
+        // ---- ASCEND: build replacement nodes (no locks) ----
         LeafPage* cur_leaf_l = left;
         LeafPage* cur_leaf_r = right;
         InternalNode* cur_node_l = nullptr;
         InternalNode* cur_node_r = nullptr;
         bool pair_is_leaf = true;
         InternalNode* saved_nn = nullptr;
-        InternalNode* anchor = nullptr;
+        InternalNode* lock_node = nullptr;
+        uint32_t lock_idx = 0;
         bool placed = false;
 
         for (int lv = static_cast<int>(path.size()) - 1; lv >= 0; --lv) {
@@ -288,7 +289,10 @@ private:
             nn->s.InsKey(static_cast<uint8_t>(cidx), sep);
 
             if (nn->s.KeyCount() < kInternalFanout) {
-                saved_nn = nn; anchor = cp; placed = true; break;
+                saved_nn = nn;
+                lock_node = (lv > 0) ? path[static_cast<size_t>(lv - 1)] : nullptr;
+                lock_idx  = (lv > 0) ? indices[static_cast<size_t>(lv - 1)] : 0;
+                placed = true; break;
             }
 
             // overflow — split nn, ascend
@@ -309,11 +313,15 @@ private:
             if (p->next == leaf) { p->next = left; break; }
         if (first_leaf_ == leaf) first_leaf_ = left;
 
-        // ---- ONE LOCK: swap prepared sub-tree into anchor ----
+        // ---- ONE LOCK: replace pointer in parent ----
         if (placed) {
-            while (!TryLock(anchor->version)) {}
-            anchor->s.SwapAll(saved_nn->s);
-            UnlockAndBump(anchor->version);
+            if (lock_node) {
+                while (!TryLock(lock_node->version)) {}
+                lock_node->s.children[lock_idx] = saved_nn;
+                UnlockAndBump(lock_node->version);
+            } else {
+                root_ = saved_nn;
+            }
         } else {
             InternalNode* nr = NewInternal();
             nr->s.PushKey(sep);
