@@ -49,8 +49,94 @@ Client (TCP)
 - **Leaf page**: 4KB aligned slab (`_aligned_malloc`), slotted page layout
 - Slot directory (14B/entry) grows right, records grow left from top
 - Linked leaves for O(n) ordered export
-- Internal nodes: `std::vector`-based, fanout 16
+- Internal nodes: `StaticVec`-based, fanout 16, inline key storage (1024B)
 - Values > 2KB stored as external blobs
+- **Leaves are immutable** (Copy-on-Write) — never modified in place
+- **Internal nodes** carry a **sequence-lock version** (`std::atomic<uint64_t>`)
+
+#### B+-tree Read Protocol (lock-free)
+
+```
+FindLeaf(key):
+  node = root_
+  while node:
+    v1 = node.version.load(acquire)
+    if v1 & 1: continue              // node locked → retry same node
+    idx = binary_search(node.keys, key)
+    child = node.children[idx] or node.child_leaves[idx]
+    v2 = node.version.load(acquire)
+    if v1 != v2: continue            // version changed → retry same node
+    if child is leaf: return child    // done — leaf is immutable
+    node = child                      // descend to next internal node
+```
+
+Properties:
+- **No locks**: readers never acquire any mutex or spinlock — pure atomic loads
+- **No CAS**: readers only `load(acquire)`, never `compare_exchange`
+- **No cross-level retries**: each node retry is self-contained
+- **Leaves read freely**: leaves are immutable (CoW), no version check needed
+- **Odd version → writer present**: reader skips the node (equivalent to spinlock observe)
+
+#### B+-tree Write Protocol (Copy-on-Write, one pointer write per operation)
+
+The odd bit of the version is the **spinlock**:
+```
+TryLock(v):    CAS even → odd (set lock bit)    — writer acquires
+IsLocked(v):   v & 1                             — reader observes
+UnlockAndBump: fetch_add(1)                      — clears odd, bumps counter
+```
+
+**Non-split** (leaf has room for new entry):
+```
+nleaf = NewLeaf()
+CopyLeafContent(nleaf, leaf)          // 1. prepare (no lock)
+nleaf.InsertEntry(key, value, ts)     // 2. insert (no lock)
+
+lock(leaf.parent)                     // 3. CAS even→odd
+leaf.parent.child_leaves[idx] = nleaf // 4. one pointer write
+unlock(leaf.parent)                   // 5. fetch_add(1): odd→even, bump counter
+
+RetireLeaf(leaf)                      // 6. defer old leaf to EBR
+```
+
+**Split** (leaf full, unified ascension loop):
+```
+left, right = split leaf + InsertEntry           // 1. prepare leaves (no lock)
+sep = right.first_key
+
+// 2. ascend: build replacement nodes (no lock)
+pair = (left, right), pair_is_leaf = true
+for lv = leaf.parent down to root:
+    cp = path[lv], cidx = indices[lv]
+    nn = NewInternal(), copy cp's Store
+    replace cidx with pair + insert sep
+    if nn.KeyCount() < fanout:
+        saved_nn = nn, lock_target = cp.parent    // fits here
+        placed = true, break
+    split nn → new (node_l, node_r) pair, ascend  // overflow
+
+// 3. splice leaf chain (no lock)
+link left/right in place of old leaf
+
+// 4. one lock + one pointer write
+if placed:
+    lock(lock_target)                              // CAS even→odd
+    lock_target.children[idx] = saved_nn           // one pointer write
+    unlock(lock_target)                            // fetch_add(1): odd→even, bump
+
+else:
+    root_ = new_root                               // no lock (single writer)
+
+RetireLeaf(leaf)
+```
+
+Properties:
+- **Entire sub-tree pre-built outside lock**: allocation, copying, splitting — all lock-free
+- **One lock per write**: `lock(leaf.parent)` (non-split) or `lock(node.parent)` (split) — exactly one CAS+fetch_add
+- **One pointer write per write**: always replacing a pointer in the parent node
+- **No in-place Store mutation**: new nodes are created, pointers replaced — never `SwapAll` or vector insertion into live nodes
+- **Version tracking**: writer bumps from even_old → odd (lock) → even_new (unlock). Readers see the bump and retry if their v1 is stale
+- **Lock scope**: nanoseconds — single pointer assignment
 
 ### SSTable v5
 ```
