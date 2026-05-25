@@ -427,6 +427,8 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
     std::vector<InternalNode*> path;
     std::vector<uint32_t> indices;
     LeafPage* leaf = FindLeafForWrite(key, path, indices);
+    // FUTURE: multi-threaded writers need full version validation during traversal.
+    // For now, single-writer guarantee ensures no concurrent mutation.
     uint32_t pos;
     bool large = (value.size() > kPageSize / 2);
     bool found = leaf->Find(key, pos);
@@ -436,6 +438,8 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
     CopyLeafContent(nleaf, leaf);
     if (nleaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone)) {
         while (!TryLock(leaf->version)) {}
+        for (LeafPage* p = first_leaf_; p; p = p->next)
+            if (p->next == leaf) { p->next = nleaf; break; }
         if (!path.empty())
             path.back()->child_leaves[indices.back()] = nleaf;
         else { auto* nr = NewInternal(); nr->child_leaves.push_back(nleaf); root_ = nr; }
