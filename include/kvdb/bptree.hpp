@@ -233,11 +233,12 @@ private:
         std::memcpy(dst->data, src->data, 4072);
     }
 
-    // Unified split: single loop from leaf parent up to root
+    // Unified split: prepare entire sub-tree, then one lock + swap
     void SplitCoW(LeafPage* leaf,
                   std::vector<InternalNode*>& path, std::vector<uint32_t>& indices,
                   const std::string& key, const std::string& value, uint64_t ts,
                   bool large, bool tomb, uint32_t pos) {
+        // ---- PREPARE leaves (no locks) ----
         LeafPage* left = NewLeaf();
         LeafPage* right = NewLeaf();
         uint32_t mid = leaf->count / 2;
@@ -255,18 +256,20 @@ private:
         right->next = leaf->next;
         std::string sep(right->Rec(0), right->KeyLen(0));
 
+        // ---- ASCEND: prepare at each level (no locks) ----
         LeafPage* cur_leaf_l = left;
         LeafPage* cur_leaf_r = right;
         InternalNode* cur_node_l = nullptr;
         InternalNode* cur_node_r = nullptr;
         bool pair_is_leaf = true;
-        InternalNode* nn = nullptr;
+        InternalNode* saved_nn = nullptr;
+        InternalNode* anchor = nullptr;
         bool placed = false;
 
         for (int lv = static_cast<int>(path.size()) - 1; lv >= 0; --lv) {
             InternalNode* cp = path[static_cast<size_t>(lv)];
             uint32_t cidx = indices[static_cast<size_t>(lv)];
-            nn = NewInternal();
+            InternalNode* nn = NewInternal();
             nn->s.CopyKeysFrom(cp->s);
             for (uint8_t i = 0; i < cp->s.children.size(); ++i) nn->s.PushChild(cp->s.Chld(i));
             for (uint8_t i = 0; i < cp->s.child_leaves.size(); ++i) nn->s.PushLeaf(cp->s.Lf(i));
@@ -285,13 +288,10 @@ private:
             nn->s.InsKey(static_cast<uint8_t>(cidx), sep);
 
             if (nn->s.KeyCount() < kInternalFanout) {
-                while (!TryLock(cp->version)) {}
-                cp->s.SwapAll(nn->s);
-                UnlockAndBump(cp->version);
-                placed = true; break;
+                saved_nn = nn; anchor = cp; placed = true; break;
             }
 
-            // overflow — split nn into internal-node pair
+            // overflow — split nn, ascend
             mid = nn->s.KeyCount() / 2;
             cur_node_l = NewInternal(); cur_node_r = NewInternal();
             cur_node_l->s.ResizeKeys(0);
@@ -304,11 +304,17 @@ private:
             pair_is_leaf = false;
         }
 
+        // ---- LEAF CHAIN ----
         for (LeafPage* p = first_leaf_; p; p = p->next)
             if (p->next == leaf) { p->next = left; break; }
         if (first_leaf_ == leaf) first_leaf_ = left;
 
-        if (!placed) {
+        // ---- ONE LOCK: swap prepared sub-tree into anchor ----
+        if (placed) {
+            while (!TryLock(anchor->version)) {}
+            anchor->s.SwapAll(saved_nn->s);
+            UnlockAndBump(anchor->version);
+        } else {
             InternalNode* nr = NewInternal();
             nr->s.PushKey(sep);
             if (pair_is_leaf) {
