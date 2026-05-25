@@ -182,6 +182,17 @@ struct InternalNode {
     void AddAbortedBatch(uint64_t batch_ts) { aborted_batch_ts_.insert(batch_ts); }
     const std::unordered_set<uint64_t>& AbortedBatches() const { return aborted_batch_ts_; }
 
+    void EnterReader() const { active_readers_.fetch_add(1, std::memory_order_acquire); }
+    void LeaveReader() const { active_readers_.fetch_sub(1, std::memory_order_release); }
+
+    struct ReadGuard {
+        const BPlusTree* tree;
+        explicit ReadGuard(const BPlusTree* t) : tree(t) { tree->EnterReader(); }
+        ~ReadGuard() { tree->LeaveReader(); }
+        ReadGuard(const ReadGuard&) = delete;
+        ReadGuard& operator=(const ReadGuard&) = delete;
+    };
+
     class MemTableWalk {
     public:
         MemTableWalk(const BPlusTree& tree);
@@ -223,7 +234,7 @@ private:
     void RetireLeaf(LeafPage* leaf) {
         auto it = std::find(leaf_nodes_.begin(), leaf_nodes_.end(), leaf);
         if (it != leaf_nodes_.end()) leaf_nodes_.erase(it);
-        retired_leaves_.push_back(leaf);
+        pending_retired_leaves_.push_back(leaf);
     }
     void CopyLeafContent(LeafPage* dst, const LeafPage* src) {
         dst->count = src->count;
@@ -364,8 +375,33 @@ private:
     size_t memory_usage_ = 0;
     std::vector<InternalNode*> internal_nodes_;
     std::vector<LeafPage*> leaf_nodes_;
+    std::vector<LeafPage*> pending_retired_leaves_;
+    std::vector<LeafPage*> leaf_pool_;
     std::vector<LeafPage*> retired_leaves_;
+    std::vector<InternalNode*> pending_retired_nodes_;
     std::unordered_set<uint64_t> aborted_batch_ts_;
+    mutable std::atomic<int> active_readers_{0};
+
+    void DrainRetired() {
+        if (active_readers_.load(std::memory_order_acquire) != 0) return;
+        for (auto* l : pending_retired_leaves_) {
+            l->~LeafPage();
+            leaf_pool_.push_back(l);
+        }
+        pending_retired_leaves_.clear();
+        for (auto* n : pending_retired_nodes_) delete n;
+        pending_retired_nodes_.clear();
+        while (leaf_pool_.size() > 64) {
+            auto* l = leaf_pool_.back(); leaf_pool_.pop_back();
+            Free(l);
+        }
+    }
+
+    void RetireNode(InternalNode* n) {
+        auto it = std::find(internal_nodes_.begin(), internal_nodes_.end(), n);
+        if (it != internal_nodes_.end()) internal_nodes_.erase(it);
+        pending_retired_nodes_.push_back(n);
+    }
 };
 
 inline void* BPlusTree::Alloc(size_t sz, size_t align) {
@@ -383,6 +419,12 @@ inline void BPlusTree::Free(void* p) {
 #endif
 }
 inline BPlusTree::LeafPage* BPlusTree::NewLeaf() {
+    if (!leaf_pool_.empty()) {
+        auto* n = leaf_pool_.back(); leaf_pool_.pop_back();
+        new (static_cast<void*>(n)) LeafPage();
+        leaf_nodes_.push_back(n);
+        return n;
+    }
     void* m = Alloc(kPageSize, 4096);
     auto* n = new (m) LeafPage();
     leaf_nodes_.push_back(n);
@@ -402,6 +444,16 @@ inline BPlusTree::BPlusTree() {
     root_ = r;
 }
 inline BPlusTree::~BPlusTree() {
+    while (active_readers_.load(std::memory_order_acquire) > 0) { /* spin */ }
+    for (auto* l : pending_retired_leaves_) {
+        l->~LeafPage();
+        leaf_pool_.push_back(l);
+    }
+    pending_retired_leaves_.clear();
+    for (auto* n : pending_retired_nodes_) delete n;
+    pending_retired_nodes_.clear();
+    for (auto* l : leaf_pool_) { l->~LeafPage(); Free(l); }
+    leaf_pool_.clear();
     for (auto* n : leaf_nodes_) {
         for (uint32_t i = 0; i < n->count; ++i)
             if (n->ValLen(i) == kLargeValFlag) {
@@ -509,6 +561,7 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
         RetireLeaf(leaf);
         if (!found) count_++;
         memory_usage_ += es;
+        DrainRetired();
         return;
     }
 
@@ -516,8 +569,10 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
              key, value, timestamp, large, is_tombstone, pos);
     if (!found) count_++;
     memory_usage_ += es;
+    DrainRetired();
 }
 inline bool BPlusTree::Lookup(const std::string& key, uint64_t read_ts, std::string& value_out) const {
+    ReadGuard guard(this);
     for (;;) {
         LeafPage* leaf = FindLeaf(key);
         if (!leaf) return false;
@@ -542,6 +597,7 @@ inline bool BPlusTree::Lookup(const std::string& key, uint64_t read_ts, std::str
     }
 }
 inline void BPlusTree::Export(std::vector<KeyValuePair>& out) const {
+    ReadGuard guard(this);
     for (LeafPage* leaf = first_leaf_; leaf; leaf = leaf->next)
         for (uint32_t i = 0; i < leaf->count; ++i) {
             std::string k(leaf->Rec(i), leaf->KeyLen(i));
