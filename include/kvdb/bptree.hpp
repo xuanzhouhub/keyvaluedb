@@ -168,9 +168,10 @@ private:
     }
 
     void SplitCoW(LeafPage* leaf, InternalNode* parent, uint32_t child_idx,
+                  std::vector<InternalNode*>& path, std::vector<uint32_t>& indices,
                   const std::string& key, const std::string& value, uint64_t ts,
                   bool large, bool tomb, uint32_t pos) {
-        // Phase 1: prepare outside lock
+        // Phase 1: Prepare leaves (no lock)
         LeafPage* left = NewLeaf();
         LeafPage* right = NewLeaf();
         uint32_t mid = leaf->count / 2;
@@ -178,48 +179,79 @@ private:
             CopyEntry(leaf, i, left, left->count);
         for (uint32_t i = mid; i < leaf->count; ++i)
             CopyEntry(leaf, i, right, right->count);
-
         if (pos < mid)
             left->InsertEntry(pos, key, value, ts, large, tomb)
                 || right->InsertEntry(right->count, key, value, ts, large, tomb);
         else
             right->InsertEntry(pos - mid, key, value, ts, large, tomb)
                 || left->InsertEntry(left->count, key, value, ts, large, tomb);
-
         left->next = right;
         right->next = leaf->next;
 
-        // Prepare new parent vectors
-        auto pchild = std::move(parent->child_leaves);
-        auto pkeys  = std::move(parent->keys);
-        auto pchildren = std::move(parent->children);
-        // parent's vectors are now empty (moved-from), we'll restore or replace
-
+        // Phase 2: Build updated parent vectors (no lock)
+        auto pchild = parent->child_leaves;
+        auto pkeys  = parent->keys;
+        auto pchildren = parent->children;
+        std::string sep(right->Rec(0), right->KeyLen(0));
         pchild[child_idx] = left;
         pchild.insert(pchild.begin() + static_cast<ptrdiff_t>(child_idx) + 1, right);
         pchildren.insert(pchildren.begin() + static_cast<ptrdiff_t>(child_idx) + 1, nullptr);
-        pkeys.insert(pkeys.begin() + static_cast<ptrdiff_t>(child_idx),
-                     std::string(right->Rec(0), right->KeyLen(0)));
+        pkeys.insert(pkeys.begin() + static_cast<ptrdiff_t>(child_idx), sep);
 
-        // Phase 2: brief lock + swap
+        bool cascade = (pkeys.size() >= kInternalFanout);
+        InternalNode* new_root = nullptr;
+        InternalNode* anchor = nullptr;
+        uint32_t anchor_idx = 0;
+
+        if (!cascade) {
+            anchor = parent;
+        } else {
+            // Phase 3: Cascade — split parent, build new internal nodes (no lock)
+            uint32_t cmid = pkeys.size() / 2;
+            InternalNode* lnode = NewInternal();
+            lnode->keys.assign(pkeys.begin(), pkeys.begin() + static_cast<ptrdiff_t>(cmid));
+            lnode->children.assign(pchildren.begin(), pchildren.begin() + static_cast<ptrdiff_t>(cmid) + 1);
+            lnode->child_leaves.assign(pchild.begin(), pchild.begin() + static_cast<ptrdiff_t>(cmid) + 1);
+            InternalNode* rnode = NewInternal();
+            rnode->keys.assign(pkeys.begin() + static_cast<ptrdiff_t>(cmid) + 1, pkeys.end());
+            rnode->children.assign(pchildren.begin() + static_cast<ptrdiff_t>(cmid) + 1, pchildren.end());
+            rnode->child_leaves.assign(pchild.begin() + static_cast<ptrdiff_t>(cmid) + 1, pchild.end());
+            std::string csep = pkeys[cmid];
+
+            if (path.size() >= 2) {
+                anchor = path[path.size() - 2];
+                anchor_idx = indices[indices.size() - 2];
+                anchor->children[anchor_idx] = lnode;
+                anchor->children.insert(anchor->children.begin() + static_cast<ptrdiff_t>(anchor_idx) + 1, rnode);
+                anchor->child_leaves.insert(anchor->child_leaves.begin() + static_cast<ptrdiff_t>(anchor_idx) + 1, nullptr);
+                anchor->keys.insert(anchor->keys.begin() + static_cast<ptrdiff_t>(anchor_idx), csep);
+            } else {
+                new_root = NewInternal();
+                new_root->keys.push_back(csep);
+                new_root->children.push_back(lnode);
+                new_root->child_leaves.push_back(nullptr);
+                new_root->children.push_back(rnode);
+                new_root->child_leaves.push_back(nullptr);
+                anchor = new_root;
+            }
+        }
+
+        // Phase 4: Lock + swap
         while (!TryLock(leaf->version)) {}
-
         for (LeafPage* p = first_leaf_; p; p = p->next)
             if (p->next == leaf) { p->next = left; break; }
         if (first_leaf_ == leaf) first_leaf_ = left;
 
-        parent->child_leaves = std::move(pchild);
-        parent->keys = std::move(pkeys);
-        parent->children = std::move(pchildren);
+        if (!cascade) {
+            parent->child_leaves = std::move(pchild);
+            parent->keys = std::move(pkeys);
+            parent->children = std::move(pchildren);
+        } else if (new_root) {
+            root_ = new_root;
+        }
 
         UnlockAndBump(leaf->version);
         RetireLeaf(leaf);
-
-        if (parent->keys.size() >= kInternalFanout) {
-            std::vector<InternalNode*> spath;
-            std::vector<uint32_t> sindices;
-            SplitInternal(parent, spath, sindices);
-        }
     }
 
     static void CopyEntry(const LeafPage* src, uint32_t i, LeafPage* dst, uint32_t pos) {
@@ -459,7 +491,7 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
         return;
     }
 
-    SplitCoW(leaf, path.back(), indices.back(),
+    SplitCoW(leaf, path.back(), indices.back(), path, indices,
              key, value, timestamp, large, is_tombstone, pos);
     if (!found) count_++;
     memory_usage_ += es;
