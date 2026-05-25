@@ -455,27 +455,28 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
     };
 
     bool hit = false;
+    std::shared_ptr<MemTable> active_snapshot;
+    std::vector<std::shared_ptr<MemTable>> frozen_snapshot;
     {
         std::shared_lock<std::shared_mutex> lock(memtable_mutex_);
-        if (active_memtable_->Lookup(key, read_ts, found_val)) {
-            hit = true;
-        } else {
-            for (auto it = frozen_memtables_.rbegin();
-                 it != frozen_memtables_.rend(); ++it) {
-                if ((*it)->Lookup(key, read_ts, found_val)) {
-                    hit = true; break;
-                }
+        active_snapshot = active_memtable_;
+        frozen_snapshot = frozen_memtables_;
+    }
+    if (active_snapshot->Lookup(key, read_ts, found_val)) {
+        hit = true;
+    } else {
+        for (auto it = frozen_snapshot.rbegin();
+             it != frozen_snapshot.rend(); ++it) {
+            if ((*it)->Lookup(key, read_ts, found_val)) {
+                hit = true; break;
             }
         }
     }
 
     if (!hit) {
         std::unordered_set<uint64_t> scanned_ids;
-        {
-            std::shared_lock<std::shared_mutex> lock(memtable_mutex_);
-            for (const auto& m : frozen_memtables_)
-                scanned_ids.insert(m->Id());
-        }
+        for (const auto& m : frozen_snapshot)
+            scanned_ids.insert(m->Id());
 
         std::vector<SSTable::Metadata> metadata;
         {
@@ -610,19 +611,23 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
 
     std::vector<std::unique_ptr<SourceIterator>> sources;
 
+    std::shared_ptr<MemTable> active_snapshot;
+    std::vector<std::shared_ptr<MemTable>> frozen_snapshot;
     {
         std::shared_lock<std::shared_mutex> lock(memtable_mutex_);
-        if (active_memtable_->EntryCount() > 0) {
-            auto vi = std::make_unique<VectorIterator>(active_memtable_->ExportEntries());
-            if (!lower.IsUnbounded()) vi->SeekToKey(lower.key);
-            if (vi->Valid()) sources.push_back(std::move(vi));
-        }
-        for (const auto& m : frozen_memtables_) {
-            if (m->EntryCount() > 0) {
-                auto ms = std::make_unique<MemTableSource>(m);
-                if (!lower.IsUnbounded()) ms->SeekToKey(lower.key);
-                if (ms->Valid()) sources.push_back(std::move(ms));
-            }
+        active_snapshot = active_memtable_;
+        frozen_snapshot = frozen_memtables_;
+    }
+    if (active_snapshot->EntryCount() > 0) {
+        auto vi = std::make_unique<VectorIterator>(active_snapshot->ExportEntries());
+        if (!lower.IsUnbounded()) vi->SeekToKey(lower.key);
+        if (vi->Valid()) sources.push_back(std::move(vi));
+    }
+    for (const auto& m : frozen_snapshot) {
+        if (m->EntryCount() > 0) {
+            auto ms = std::make_unique<MemTableSource>(m);
+            if (!lower.IsUnbounded()) ms->SeekToKey(lower.key);
+            if (ms->Valid()) sources.push_back(std::move(ms));
         }
     }
 
