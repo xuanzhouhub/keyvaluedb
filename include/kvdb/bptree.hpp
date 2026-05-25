@@ -138,8 +138,10 @@ struct InternalNode {
         void PushLeaf(LeafPage* l) { child_leaves.push_back(l); }
         void SwapAll(Store& o) {
             Store tmp; tmp.CopyKeysFrom(*this); CopyKeysFrom(o); o.CopyKeysFrom(tmp);
-            for (uint8_t i=0;i<children.size();++i) std::swap(children[i],o.children[i]);
-            for (uint8_t i=0;i<child_leaves.size();++i) std::swap(child_leaves[i],o.child_leaves[i]);
+            uint8_t max_c = children.n > o.children.n ? children.n : o.children.n;
+            uint8_t max_l = child_leaves.n > o.child_leaves.n ? child_leaves.n : o.child_leaves.n;
+            for (uint8_t i=0;i<max_c;++i) std::swap(children[i],o.children[i]);
+            for (uint8_t i=0;i<max_l;++i) std::swap(child_leaves[i],o.child_leaves[i]);
             std::swap(children.n,o.children.n); std::swap(child_leaves.n,o.child_leaves.n);
         }
     };
@@ -231,59 +233,11 @@ private:
         std::memcpy(dst->data, src->data, 4072);
     }
 
-    // Unified split (no temp vectors): non-split + cascade in one loop
-    void SplitCoW2(LeafPage* leaf, InternalNode* parent, uint32_t child_idx,
-                   std::vector<InternalNode*>& path, std::vector<uint32_t>& indices,
-                   const std::string& key, const std::string& value, uint64_t ts,
-                   bool large, bool tomb, uint32_t pos) {
-        LeafPage* left=NewLeaf(),*right=NewLeaf();
-        uint32_t mid=leaf->count/2;
-        for(uint32_t i=0;i<mid;++i)CopyEntry(leaf,i,left,left->count);
-        for(uint32_t i=mid;i<leaf->count;++i)CopyEntry(leaf,i,right,right->count);
-        if(pos<mid)left->InsertEntry(pos,key,value,ts,large,tomb)||right->InsertEntry(right->count,key,value,ts,large,tomb);
-        else right->InsertEntry(pos-mid,key,value,ts,large,tomb)||left->InsertEntry(left->count,key,value,ts,large,tomb);
-        left->next=right;right->next=leaf->next;
-        std::string sep(right->Rec(0),right->KeyLen(0));
-
-        InternalNode* nn=NewInternal();
-        nn->s.CopyKeysFrom(parent->s);
-        for(uint8_t i=0;i<parent->s.children.size();++i)nn->s.PushChild(parent->s.Chld(i));
-        for(uint8_t i=0;i<parent->s.child_leaves.size();++i)nn->s.PushLeaf(parent->s.Lf(i));
-        nn->s.SetChild(static_cast<uint8_t>(child_idx),nullptr);
-        nn->s.SetLeaf(static_cast<uint8_t>(child_idx),left);
-        nn->s.InsChild(static_cast<uint8_t>(child_idx+1),nullptr);
-        nn->s.InsLeaf(static_cast<uint8_t>(child_idx+1),right);
-        nn->s.InsKey(static_cast<uint8_t>(child_idx),sep);
-
-        if(nn->s.KeyCount()<kInternalFanout){
-            while(!TryLock(parent->version)){}
-            parent->s.SwapAll(nn->s);
-            UnlockAndBump(parent->version);
-        } else {
-            // Cascade — always create new root (grandparent loop TODO)
-            uint32_t cm=nn->s.KeyCount()/2;
-            InternalNode* il=NewInternal(),*ir=NewInternal();
-            for(uint8_t i=0;i<cm;++i)il->s.PushKey(nn->s.KeyStr(i));
-            for(uint8_t i=0;i<=cm;++i){il->s.PushChild(nn->s.Chld(i));il->s.PushLeaf(nn->s.Lf(i));}
-            for(uint8_t i=cm+1;i<nn->s.KeyCount();++i)ir->s.PushKey(nn->s.KeyStr(i));
-            for(uint8_t i=cm+1;i<=nn->s.KeyCount();++i){ir->s.PushChild(nn->s.Chld(i));ir->s.PushLeaf(nn->s.Lf(i));}
-            std::string csep=nn->s.KeyStr(static_cast<uint8_t>(cm));
-            InternalNode* nr=NewInternal();
-            nr->s.PushKey(csep);nr->s.PushChild(il);nr->s.PushLeaf(nullptr);
-            nr->s.PushChild(ir);nr->s.PushLeaf(nullptr);
-            root_=nr;
-        }
-
-        for(LeafPage* p=first_leaf_;p;p=p->next)if(p->next==leaf){p->next=left;break;}
-        if(first_leaf_==leaf)first_leaf_=left;
-        RetireLeaf(leaf);
-    }
-
+    // Unified split: non-cascade + grandparent ascension loop
     void SplitCoW(LeafPage* leaf, InternalNode* parent, uint32_t child_idx,
                   std::vector<InternalNode*>& path, std::vector<uint32_t>& indices,
                   const std::string& key, const std::string& value, uint64_t ts,
                   bool large, bool tomb, uint32_t pos) {
-        // Phase 1: Prepare leaves (no lock)
         LeafPage* left = NewLeaf();
         LeafPage* right = NewLeaf();
         uint32_t mid = leaf->count / 2;
@@ -300,80 +254,84 @@ private:
         left->next = right;
         right->next = leaf->next;
 
-        // Phase 2: Build updated parent vectors (no lock)
-        auto pchild = parent->s.child_leaves;
-        auto pkeys = std::vector<std::string>(); parent->s.CopyKeysTo(pkeys);
-        auto pchildren = parent->s.children;
+        InternalNode* nn = NewInternal();
+        nn->s.CopyKeysFrom(parent->s);
+        for (uint8_t i = 0; i < parent->s.children.size(); ++i) nn->s.PushChild(parent->s.Chld(i));
+        for (uint8_t i = 0; i < parent->s.child_leaves.size(); ++i) nn->s.PushLeaf(parent->s.Lf(i));
         std::string sep(right->Rec(0), right->KeyLen(0));
-        pchild[child_idx] = left;
-        pchild.insert(pchild.begin() + static_cast<ptrdiff_t>(child_idx) + 1, right);
-        pchildren.insert(pchildren.begin() + static_cast<ptrdiff_t>(child_idx) + 1, nullptr);
-        pkeys.insert(pkeys.begin() + static_cast<ptrdiff_t>(child_idx), sep);
+        nn->s.SetChild(static_cast<uint8_t>(child_idx), nullptr);
+        nn->s.SetLeaf(static_cast<uint8_t>(child_idx), left);
+        nn->s.InsChild(static_cast<uint8_t>(child_idx + 1), nullptr);
+        nn->s.InsLeaf(static_cast<uint8_t>(child_idx + 1), right);
+        nn->s.InsKey(static_cast<uint8_t>(child_idx), sep);
 
-        bool cascade = (pkeys.size() >= kInternalFanout);
-        InternalNode* new_root_node = nullptr;
-        InternalNode* anchor_node = nullptr;
-        uint32_t anchor_idx = 0;
-        auto gpchild = parent->s.child_leaves;   // dummy default
-        auto gpkeys = std::vector<std::string>(); parent->s.CopyKeysTo(gpkeys);
-        auto gpchildren = parent->s.children;
-
-        if (!cascade) {
-            anchor_node = parent;
-        } else {
-            // Phase 3: Build cascade nodes and grandparent vectors (no lock)
-            uint32_t cmid = pkeys.size() / 2;
-            InternalNode* lnode = NewInternal();
-            lnode->s.ResizeKeys(0);
-            for (size_t i = 0; i < cmid; ++i) lnode->s.PushKey(pkeys[i]);
-            lnode->s.children.assign(pchildren.begin(), pchildren.begin() + static_cast<ptrdiff_t>(cmid) + 1);
-            lnode->s.child_leaves.assign(pchild.begin(), pchild.begin() + static_cast<ptrdiff_t>(cmid) + 1);
-            InternalNode* rnode = NewInternal();
-            rnode->s.ResizeKeys(0);
-            for (size_t i = cmid + 1; i < pkeys.size(); ++i) rnode->s.PushKey(pkeys[i]);
-            rnode->s.children.assign(pchildren.begin() + static_cast<ptrdiff_t>(cmid) + 1, pchildren.end());
-            rnode->s.child_leaves.assign(pchild.begin() + static_cast<ptrdiff_t>(cmid) + 1, pchild.end());
-            std::string csep = pkeys[cmid];
-
-            if (path.size() >= 2) {
-                anchor_node = path[path.size() - 2];
-                anchor_idx = indices[indices.size() - 2];
-                gpchild = anchor_node->s.child_leaves;
-                anchor_node->s.CopyKeysTo(gpkeys);
-                gpchildren = anchor_node->s.children;
-                gpchildren[anchor_idx] = lnode;
-                gpchildren.insert(gpchildren.begin() + static_cast<ptrdiff_t>(anchor_idx) + 1, rnode);
-                gpchild.insert(gpchild.begin() + static_cast<ptrdiff_t>(anchor_idx) + 1, nullptr);
-                gpkeys.insert(gpkeys.begin() + static_cast<ptrdiff_t>(anchor_idx), csep);
-            } else {
-                new_root_node = NewInternal();
-                new_root_node->s.PushKey(csep);
-                new_root_node->s.children.push_back(lnode);
-                new_root_node->s.child_leaves.push_back(nullptr);
-                new_root_node->s.children.push_back(rnode);
-                new_root_node->s.child_leaves.push_back(nullptr);
-                anchor_node = new_root_node;
-            }
+        if (nn->s.KeyCount() < kInternalFanout) {
+            while (!TryLock(parent->version)) {}
+            for (LeafPage* p = first_leaf_; p; p = p->next)
+                if (p->next == leaf) { p->next = left; break; }
+            if (first_leaf_ == leaf) first_leaf_ = left;
+            parent->s.SwapAll(nn->s);
+            UnlockAndBump(parent->version);
+            RetireLeaf(leaf);
+            return;
         }
 
-        // Phase 4: Brief lock + apply
-        while (!TryLock(anchor_node->version)) {}
+        // Cascade: split nn, ascend through ancestors
+        uint32_t cmid = nn->s.KeyCount() / 2;
+        InternalNode* il = NewInternal();
+        InternalNode* ir = NewInternal();
+        il->s.ResizeKeys(0);
+        for (uint8_t i = 0; i < cmid; ++i) il->s.PushKey(nn->s.KeyStr(i));
+        for (uint8_t i = 0; i <= cmid; ++i) { il->s.PushChild(nn->s.Chld(i)); il->s.PushLeaf(nn->s.Lf(i)); }
+        ir->s.ResizeKeys(0);
+        for (uint8_t i = cmid + 1; i < nn->s.KeyCount(); ++i) ir->s.PushKey(nn->s.KeyStr(i));
+        for (uint8_t i = cmid + 1; i <= nn->s.KeyCount(); ++i) { ir->s.PushChild(nn->s.Chld(i)); ir->s.PushLeaf(nn->s.Lf(i)); }
+        std::string csep = nn->s.KeyStr(static_cast<uint8_t>(cmid));
+
         for (LeafPage* p = first_leaf_; p; p = p->next)
             if (p->next == leaf) { p->next = left; break; }
         if (first_leaf_ == leaf) first_leaf_ = left;
 
-        if (!cascade) {
-            parent->s.child_leaves = std::move(pchild);
-            parent->s.AssignKeysFrom(pkeys);
-            parent->s.children = std::move(pchildren);
-        } else if (new_root_node) {
-            root_ = new_root_node;
-        } else {
-            anchor_node->s.child_leaves = std::move(gpchild);
-            anchor_node->s.AssignKeysFrom(gpkeys);
-            anchor_node->s.children = std::move(gpchildren);
+        bool placed = false;
+        for (int lv = static_cast<int>(path.size()) - 2; lv >= 0; --lv) {
+            InternalNode* cp = path[static_cast<size_t>(lv)];
+            nn = NewInternal();
+            nn->s.CopyKeysFrom(cp->s);
+            for (uint8_t i = 0; i < cp->s.children.size(); ++i) nn->s.PushChild(cp->s.Chld(i));
+            for (uint8_t i = 0; i < cp->s.child_leaves.size(); ++i) nn->s.PushLeaf(cp->s.Lf(i));
+            uint32_t cidx = indices[static_cast<size_t>(lv)];
+            nn->s.SetChild(static_cast<uint8_t>(cidx), il);
+            nn->s.SetLeaf(static_cast<uint8_t>(cidx), nullptr);
+            nn->s.InsChild(static_cast<uint8_t>(cidx + 1), ir);
+            nn->s.InsLeaf(static_cast<uint8_t>(cidx + 1), nullptr);
+            nn->s.InsKey(static_cast<uint8_t>(cidx), csep);
+
+            if (nn->s.KeyCount() < kInternalFanout) {
+                while (!TryLock(cp->version)) {}
+                cp->s.SwapAll(nn->s);
+                UnlockAndBump(cp->version);
+                placed = true; break;
+            }
+            // overflow — split again
+            cmid = nn->s.KeyCount() / 2;
+            il = NewInternal(); ir = NewInternal();
+            il->s.ResizeKeys(0);
+            for (uint8_t i = 0; i < cmid; ++i) il->s.PushKey(nn->s.KeyStr(i));
+            for (uint8_t i = 0; i <= cmid; ++i) { il->s.PushChild(nn->s.Chld(i)); il->s.PushLeaf(nn->s.Lf(i)); }
+            ir->s.ResizeKeys(0);
+            for (uint8_t i = cmid + 1; i < nn->s.KeyCount(); ++i) ir->s.PushKey(nn->s.KeyStr(i));
+            for (uint8_t i = cmid + 1; i <= nn->s.KeyCount(); ++i) { ir->s.PushChild(nn->s.Chld(i)); ir->s.PushLeaf(nn->s.Lf(i)); }
+            csep = nn->s.KeyStr(static_cast<uint8_t>(cmid));
         }
-        UnlockAndBump(anchor_node->version);
+
+        if (!placed) {
+            InternalNode* nr = NewInternal();
+            nr->s.PushKey(csep);
+            nr->s.PushChild(il); nr->s.PushLeaf(nullptr);
+            nr->s.PushChild(ir); nr->s.PushLeaf(nullptr);
+            root_ = nr;
+        }
+
         RetireLeaf(leaf);
     }
 
@@ -396,10 +354,6 @@ private:
     LeafPage* FindLeafForWrite(const std::string& key,
                                std::vector<InternalNode*>& path,
                                std::vector<uint32_t>& indices);
-    void SplitLeaf(LeafPage* leaf, InternalNode* parent, uint32_t idx,
-                   std::vector<InternalNode*>& path, std::vector<uint32_t>& indices);
-    void SplitInternal(InternalNode* node, std::vector<InternalNode*>& path,
-                       std::vector<uint32_t>& indices);
 
     InternalNode* root_ = nullptr;
     LeafPage* first_leaf_ = nullptr;
@@ -527,73 +481,6 @@ inline BPlusTree::LeafPage* BPlusTree::FindLeafForWrite(
         node = next;
     }
     return nullptr;
-}
-inline void BPlusTree::SplitLeaf(
-    LeafPage* leaf, InternalNode* parent, uint32_t child_idx,
-    std::vector<InternalNode*>& path, std::vector<uint32_t>& indices) {
-    while (!TryLock(parent->version)) {}
-    LeafPage* nl = NewLeaf();
-    uint32_t mid = leaf->count / 2;
-    for (uint32_t i = mid; i < leaf->count; ++i) {
-        bool blob = (leaf->ValLen(i) == kLargeValFlag);
-        std::string k(leaf->Rec(i), leaf->KeyLen(i));
-        std::string v;
-        if (blob) {
-            void* ptr; std::memcpy(&ptr, leaf->Rec(i) + leaf->KeyLen(i), sizeof(void*));
-            size_t sz; std::memcpy(&sz, ptr, 8);
-            v.assign(static_cast<const char*>(ptr) + 8, sz);
-            Free(ptr);
-        } else {
-            v.assign(leaf->Rec(i) + leaf->KeyLen(i), leaf->ValLen(i));
-        }
-        nl->InsertEntry(nl->count, k, v, leaf->Timestamp(i), blob, leaf->IsTombstone(i));
-    }
-    leaf->count = mid;
-    leaf->slot_end = LeafPage::kSlotBase + mid * LeafPage::kSlotSize;
-    nl->next = leaf->next; leaf->next = nl;
-
-    std::string sep(nl->Rec(0), nl->KeyLen(0));
-    parent->s.child_leaves.insert(
-        parent->s.child_leaves.begin() + static_cast<ptrdiff_t>(child_idx) + 1, nl);
-    parent->s.children.insert(
-        parent->s.children.begin() + static_cast<ptrdiff_t>(child_idx) + 1, nullptr);
-    parent->s.InsKey(static_cast<uint8_t>(child_idx), sep);
-    UnlockAndBump(parent->version);
-    if (parent->s.KeyCount() >= kInternalFanout) SplitInternal(parent, path, indices);
-}
-inline void BPlusTree::SplitInternal(
-    InternalNode* node, std::vector<InternalNode*>& path, std::vector<uint32_t>& indices) {
-    while (!TryLock(node->version)) {}
-    InternalNode* nn = NewInternal();
-    uint32_t mid = node->s.KeyCount() / 2;
-    std::string mid_key = node->s.KeyRef(static_cast<uint8_t>(mid));
-
-    nn->s.ResizeKeys(0);
-    for (uint32_t i = mid + 1; i < node->s.KeyCount(); ++i)
-        nn->s.PushKey(node->s.KeyRef(static_cast<uint8_t>(i)));
-    nn->s.children.assign(node->s.children.begin() + static_cast<ptrdiff_t>(mid) + 1, node->s.children.end());
-    nn->s.child_leaves.assign(node->s.child_leaves.begin() + static_cast<ptrdiff_t>(mid) + 1, node->s.child_leaves.end());
-    node->s.ResizeKeys(static_cast<uint8_t>(mid));
-    node->s.children.resize(mid + 1);
-    node->s.child_leaves.resize(mid + 1);
-
-    if (path.size() <= 1) {
-        InternalNode* nr = NewInternal();
-        nr->s.PushKey(mid_key);
-        nr->s.children.push_back(node); nr->s.child_leaves.push_back(nullptr);
-        nr->s.children.push_back(nn); nr->s.child_leaves.push_back(nullptr);
-        root_ = nr;
-        UnlockAndBump(node->version);
-    } else {
-        InternalNode* p = path[path.size()-2]; uint32_t idx = indices[indices.size()-2];
-        while (!TryLock(p->version)) {}
-        p->s.InsKey(static_cast<uint8_t>(idx), mid_key);
-        p->s.children.insert(p->s.children.begin() + static_cast<ptrdiff_t>(idx) + 1, nn);
-        p->s.child_leaves.insert(p->s.child_leaves.begin() + static_cast<ptrdiff_t>(idx) + 1, nullptr);
-        UnlockAndBump(p->version);
-        UnlockAndBump(node->version);
-        if (p->s.KeyCount() >= kInternalFanout) { path.pop_back(); indices.pop_back(); SplitInternal(p, path, indices); }
-    }
 }
 inline void BPlusTree::Insert(const std::string& key, const std::string& value, uint64_t timestamp, bool is_tombstone) {
     std::vector<InternalNode*> path;
