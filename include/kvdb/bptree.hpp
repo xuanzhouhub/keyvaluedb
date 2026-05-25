@@ -154,6 +154,11 @@ private:
     static void* Alloc(size_t sz, size_t align);
     static void Free(void* p);
 
+    void RetireLeaf(LeafPage* leaf) {
+        auto it = std::find(leaf_nodes_.begin(), leaf_nodes_.end(), leaf);
+        if (it != leaf_nodes_.end()) leaf_nodes_.erase(it);
+        retired_leaves_.push_back(leaf);
+    }
     void CopyLeafContent(LeafPage* dst, const LeafPage* src) {
         dst->count = src->count;
         dst->data_start = src->data_start;
@@ -366,6 +371,21 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
 
     if (leaf->Find(key, pos)) {
         size_t es = key.size() + value.size() + Config::kMemTableEntryOverheadBytes;
+
+        LeafPage* nleaf = NewLeaf();
+        CopyLeafContent(nleaf, leaf);
+        if (nleaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone)) {
+            while (!TryLock(leaf->version)) {}
+            if (!path.empty())
+                path.back()->child_leaves[indices.back()] = nleaf;
+            else { auto* nr = NewInternal(); nr->child_leaves.push_back(nleaf); root_ = nr; }
+            if (first_leaf_ == leaf) first_leaf_ = nleaf;
+            UnlockAndBump(leaf->version);
+            RetireLeaf(leaf);
+            memory_usage_ += es;
+            return;
+        }
+
         while (!TryLock(leaf->version)) {}
         if (!leaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone)) {
             UnlockAndBump(leaf->version);
