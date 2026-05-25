@@ -366,22 +366,30 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
 
     if (leaf->Find(key, pos)) {
         size_t es = key.size() + value.size() + Config::kMemTableEntryOverheadBytes;
+        while (!TryLock(leaf->version)) {}
         if (!leaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone)) {
+            UnlockAndBump(leaf->version);
             SplitLeaf(leaf, path.back(), indices.back(), path, indices);
             leaf = FindLeafForWrite(key, path, indices);
             leaf->Find(key, pos);
+            while (!TryLock(leaf->version)) {}
             leaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone);
         }
+        UnlockAndBump(leaf->version);
         memory_usage_ += es;
         return;
     }
 
+    while (!TryLock(leaf->version)) {}
     if (!leaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone)) {
+        UnlockAndBump(leaf->version);
         SplitLeaf(leaf, path.back(), indices.back(), path, indices);
         leaf = FindLeafForWrite(key, path, indices);
         leaf->Find(key, pos);
+        while (!TryLock(leaf->version)) {}
         leaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone);
     }
+    UnlockAndBump(leaf->version);
     count_++;
     memory_usage_ += key.size() + value.size() + Config::kMemTableEntryOverheadBytes;
 }
