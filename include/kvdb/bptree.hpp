@@ -166,6 +166,67 @@ private:
         dst->next = src->next;
         std::memcpy(dst->data, src->data, 4064);
     }
+
+    void SplitCoW(LeafPage* leaf, InternalNode* parent, uint32_t child_idx,
+                  const std::string& key, const std::string& value, uint64_t ts,
+                  bool large, bool tomb, uint32_t pos) {
+        LeafPage* left = NewLeaf();
+        LeafPage* right = NewLeaf();
+        uint32_t mid = leaf->count / 2;
+        for (uint32_t i = 0; i < mid; ++i)
+            CopyEntry(leaf, i, left, left->count);
+        for (uint32_t i = mid; i < leaf->count; ++i)
+            CopyEntry(leaf, i, right, right->count);
+
+        bool ok;
+        if (pos < mid)
+            ok = left->InsertEntry(pos, key, value, ts, large, tomb)
+              || right->InsertEntry(right->count, key, value, ts, large, tomb);
+        else
+            ok = right->InsertEntry(pos - mid, key, value, ts, large, tomb)
+              || left->InsertEntry(left->count, key, value, ts, large, tomb);
+
+        while (!TryLock(leaf->version)) {}
+        while (!TryLock(parent->version)) {}
+
+        parent->child_leaves[child_idx] = left;
+        parent->child_leaves.insert(
+            parent->child_leaves.begin() + static_cast<ptrdiff_t>(child_idx) + 1, right);
+        parent->children.insert(
+            parent->children.begin() + static_cast<ptrdiff_t>(child_idx) + 1, nullptr);
+        parent->keys.insert(
+            parent->keys.begin() + static_cast<ptrdiff_t>(child_idx),
+            std::string(right->Rec(0), right->KeyLen(0)));
+
+        left->next = right;
+        right->next = leaf->next;
+
+        if (first_leaf_ == leaf) first_leaf_ = left;
+
+        UnlockAndBump(parent->version);
+        UnlockAndBump(leaf->version);
+        RetireLeaf(leaf);
+
+        if (parent->keys.size() >= kInternalFanout) {
+            std::vector<InternalNode*> spath;
+            std::vector<uint32_t> sindices;
+            SplitInternal(parent, spath, sindices);
+        }
+    }
+
+    static void CopyEntry(const LeafPage* src, uint32_t i, LeafPage* dst, uint32_t pos) {
+        bool blob = (src->ValLen(i) == kLargeValFlag);
+        std::string k(src->Rec(i), src->KeyLen(i));
+        std::string v;
+        if (blob) {
+            void* ptr; std::memcpy(&ptr, src->Rec(i) + src->KeyLen(i), sizeof(void*));
+            size_t sz; std::memcpy(&sz, ptr, 8);
+            v.assign(static_cast<const char*>(ptr) + 8, sz);
+        } else {
+            v.assign(src->Rec(i) + src->KeyLen(i), src->ValLen(i));
+        }
+        dst->InsertEntry(pos, k, v, src->Timestamp(i), blob, src->IsTombstone(i));
+    }
     LeafPage* NewLeaf();
     InternalNode* NewInternal();
     LeafPage* FindLeaf(const std::string& key) const;
