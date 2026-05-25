@@ -71,20 +71,40 @@ public:
                          bool store_blob, bool is_tombstone = false);
     };
 
-    struct InternalNode {
-        struct Store {
-            std::vector<std::string> keys;
-            std::vector<InternalNode*> children;
-            std::vector<LeafPage*> child_leaves;
-        };
+template<typename T, size_t N>
+struct StaticVec {
+    T data[N] = {};
+    size_t n = 0;
+    size_t size() const { return n; }
+    T& operator[](size_t i) { return data[i]; }
+    const T& operator[](size_t i) const { return data[i]; }
+    T* begin() { return data; }
+    T* end() { return data + n; }
+    const T* begin() const { return data; }
+    const T* end() const { return data + n; }
+    void push_back(const T& v) { data[n++] = v; }
+    void insert(T* pos, const T& v) {
+        size_t idx = static_cast<size_t>(pos - data);
+        for (size_t i = n; i > idx; --i) data[i] = data[i-1];
+        data[idx] = v; ++n;
+    }
+    void resize(size_t sz) { n = sz; }
+    template<typename It>
+    void assign(It b, It e) { n = 0; while (b != e) data[n++] = *b++; }
+};
+
+struct InternalNode {
+    struct Store {
+        std::vector<std::string> keys;
+        StaticVec<InternalNode*, kInternalFanout + 1> children;
+        StaticVec<LeafPage*, kInternalFanout + 1> child_leaves;
+    };
         Store s;
         std::atomic<uint64_t> version{0};
 
-        InternalNode() {
-            s.keys.reserve(kInternalFanout);
-            s.children.reserve(kInternalFanout + 1);
-            s.child_leaves.reserve(kInternalFanout + 1);
-        }
+    InternalNode() {
+        s.keys.reserve(kInternalFanout);
+    }
 
         uint32_t FindChild(const std::string& key) const {
             uint32_t lo = 0, hi = static_cast<uint32_t>(s.keys.size());
