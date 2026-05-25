@@ -95,37 +95,38 @@ struct StaticVec {
 
 struct InternalNode {
     struct Store {
-        static constexpr size_t kKeyDataSize = 1024;
+        static constexpr size_t kKeyBufSize = 1024;
         uint8_t key_count = 0;
+        uint8_t _pad = 0;
+        uint16_t key_data_end = 0;
         uint16_t key_offs[kInternalFanout] = {};
         uint16_t key_lens[kInternalFanout] = {};
-        uint16_t key_data_end = 0;
-        char key_data[kKeyDataSize] = {};
+        char key_data[kKeyBufSize] = {};
         StaticVec<InternalNode*, kInternalFanout + 1> children;
         StaticVec<LeafPage*, kInternalFanout + 1> child_leaves;
 
         uint8_t KeyCount() const { return key_count; }
-        const char* KeyPtr(uint8_t i) const { return key_data + key_offs[i]; }
-        uint16_t KeyLen(uint8_t i) const { return key_lens[i]; }
-        std::string KeyStr(uint8_t i) const { return std::string(KeyPtr(i), KeyLen(i)); }
-        const std::string& KeyRef(uint8_t i) const { static std::string tmp; tmp = KeyStr(i); return tmp; }
+        std::string KeyStr(uint8_t i) const { return std::string(key_data+key_offs[i], key_lens[i]); }
+        const std::string& KeyRef(uint8_t i) const { static std::string tmp; tmp=KeyStr(i); return tmp; }
         void InsKey(uint8_t pos, const std::string& k) {
-            for (uint8_t i = key_count; i > pos; --i) { key_offs[i] = key_offs[i-1]; key_lens[i] = key_lens[i-1]; }
-            uint16_t len = static_cast<uint16_t>(k.size());
-            key_offs[pos] = key_data_end; key_lens[pos] = len;
-            std::memcpy(key_data + key_data_end, k.data(), len);
-            key_data_end += len;
-            ++key_count;
+            for (uint8_t i=key_count; i>pos; --i){key_offs[i]=key_offs[i-1];key_lens[i]=key_lens[i-1];}
+            uint16_t len=static_cast<uint16_t>(k.size());
+            key_offs[pos]=key_data_end; key_lens[pos]=len;
+            std::memcpy(key_data+key_data_end,k.data(),len); key_data_end+=len; ++key_count;
         }
-        void PushKey(const std::string& k) { InsKey(key_count, k); }
-        void ResizeKeys(uint8_t n) { key_count = n; if (n > 0) key_data_end = key_offs[n-1] + key_lens[n-1]; else key_data_end = 0; }
-        void AssignKeysFrom(std::vector<std::string>& src) {
-            key_count = 0; key_data_end = 0;
-            for (auto& k : src) PushKey(k);
-        }
+        void PushKey(const std::string& k) { InsKey(key_count,k); }
+        void ResizeKeys(uint8_t n) { key_count=n; if(n>0)key_data_end=key_offs[n-1]+key_lens[n-1];else key_data_end=0; }
         void CopyKeysTo(std::vector<std::string>& dst) const {
-            dst.clear();
-            for (uint8_t i = 0; i < key_count; ++i) dst.push_back(KeyStr(i));
+            dst.clear(); for(uint8_t i=0;i<key_count;++i) dst.push_back(KeyStr(i));
+        }
+        void AssignKeysFrom(std::vector<std::string>& src) {
+            key_count=0;key_data_end=0; for(auto&k:src) PushKey(k);
+        }
+        void CopyKeysFrom(const Store& src) {
+            key_count=src.key_count; key_data_end=src.key_data_end;
+            std::memcpy(key_offs,src.key_offs,sizeof(key_offs));
+            std::memcpy(key_lens,src.key_lens,sizeof(key_lens));
+            std::memcpy(key_data,src.key_data,key_data_end);
         }
     };
         Store s;
