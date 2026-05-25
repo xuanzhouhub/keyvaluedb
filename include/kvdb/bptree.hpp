@@ -400,6 +400,21 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
         return;
     }
 
+    LeafPage* nleaf = NewLeaf();
+    CopyLeafContent(nleaf, leaf);
+    if (nleaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone)) {
+        while (!TryLock(leaf->version)) {}
+        if (!path.empty())
+            path.back()->child_leaves[indices.back()] = nleaf;
+        else { auto* nr = NewInternal(); nr->child_leaves.push_back(nleaf); root_ = nr; }
+        if (first_leaf_ == leaf) first_leaf_ = nleaf;
+        UnlockAndBump(leaf->version);
+        RetireLeaf(leaf);
+        count_++;
+        memory_usage_ += key.size() + value.size() + Config::kMemTableEntryOverheadBytes;
+        return;
+    }
+
     while (!TryLock(leaf->version)) {}
     if (!leaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone)) {
         UnlockAndBump(leaf->version);
