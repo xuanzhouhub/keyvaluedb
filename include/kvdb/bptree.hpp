@@ -170,6 +170,7 @@ private:
     void SplitCoW(LeafPage* leaf, InternalNode* parent, uint32_t child_idx,
                   const std::string& key, const std::string& value, uint64_t ts,
                   bool large, bool tomb, uint32_t pos) {
+        // Phase 1: prepare outside lock
         LeafPage* left = NewLeaf();
         LeafPage* right = NewLeaf();
         uint32_t mid = leaf->count / 2;
@@ -178,32 +179,39 @@ private:
         for (uint32_t i = mid; i < leaf->count; ++i)
             CopyEntry(leaf, i, right, right->count);
 
-        bool ok;
         if (pos < mid)
-            ok = left->InsertEntry(pos, key, value, ts, large, tomb)
-              || right->InsertEntry(right->count, key, value, ts, large, tomb);
+            left->InsertEntry(pos, key, value, ts, large, tomb)
+                || right->InsertEntry(right->count, key, value, ts, large, tomb);
         else
-            ok = right->InsertEntry(pos - mid, key, value, ts, large, tomb)
-              || left->InsertEntry(left->count, key, value, ts, large, tomb);
-
-        while (!TryLock(leaf->version)) {}
-        while (!TryLock(parent->version)) {}
-
-        parent->child_leaves[child_idx] = left;
-        parent->child_leaves.insert(
-            parent->child_leaves.begin() + static_cast<ptrdiff_t>(child_idx) + 1, right);
-        parent->children.insert(
-            parent->children.begin() + static_cast<ptrdiff_t>(child_idx) + 1, nullptr);
-        parent->keys.insert(
-            parent->keys.begin() + static_cast<ptrdiff_t>(child_idx),
-            std::string(right->Rec(0), right->KeyLen(0)));
+            right->InsertEntry(pos - mid, key, value, ts, large, tomb)
+                || left->InsertEntry(left->count, key, value, ts, large, tomb);
 
         left->next = right;
         right->next = leaf->next;
 
+        // Prepare new parent vectors
+        auto pchild = std::move(parent->child_leaves);
+        auto pkeys  = std::move(parent->keys);
+        auto pchildren = std::move(parent->children);
+        // parent's vectors are now empty (moved-from), we'll restore or replace
+
+        pchild[child_idx] = left;
+        pchild.insert(pchild.begin() + static_cast<ptrdiff_t>(child_idx) + 1, right);
+        pchildren.insert(pchildren.begin() + static_cast<ptrdiff_t>(child_idx) + 1, nullptr);
+        pkeys.insert(pkeys.begin() + static_cast<ptrdiff_t>(child_idx),
+                     std::string(right->Rec(0), right->KeyLen(0)));
+
+        // Phase 2: brief lock + swap
+        while (!TryLock(leaf->version)) {}
+
+        for (LeafPage* p = first_leaf_; p; p = p->next)
+            if (p->next == leaf) { p->next = left; break; }
         if (first_leaf_ == leaf) first_leaf_ = left;
 
-        UnlockAndBump(parent->version);
+        parent->child_leaves = std::move(pchild);
+        parent->keys = std::move(pkeys);
+        parent->children = std::move(pchildren);
+
         UnlockAndBump(leaf->version);
         RetireLeaf(leaf);
 
@@ -451,16 +459,8 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
         return;
     }
 
-    while (!TryLock(leaf->version)) {}
-    if (!leaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone)) {
-        UnlockAndBump(leaf->version);
-        SplitLeaf(leaf, path.back(), indices.back(), path, indices);
-        leaf = FindLeafForWrite(key, path, indices);
-        leaf->Find(key, pos);
-        while (!TryLock(leaf->version)) {}
-        leaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone);
-    }
-    UnlockAndBump(leaf->version);
+    SplitCoW(leaf, path.back(), indices.back(),
+             key, value, timestamp, large, is_tombstone, pos);
     if (!found) count_++;
     memory_usage_ += es;
 }
