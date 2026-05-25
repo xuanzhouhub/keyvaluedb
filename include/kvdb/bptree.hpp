@@ -233,8 +233,8 @@ private:
         std::memcpy(dst->data, src->data, 4072);
     }
 
-    // Unified split: non-cascade + grandparent ascension loop
-    void SplitCoW(LeafPage* leaf, InternalNode* parent, uint32_t child_idx,
+    // Unified split: single loop from leaf parent up to root
+    void SplitCoW(LeafPage* leaf,
                   std::vector<InternalNode*>& path, std::vector<uint32_t>& indices,
                   const std::string& key, const std::string& value, uint64_t ts,
                   bool large, bool tomb, uint32_t pos) {
@@ -253,58 +253,36 @@ private:
                 || left->InsertEntry(left->count, key, value, ts, large, tomb);
         left->next = right;
         right->next = leaf->next;
-
-        InternalNode* nn = NewInternal();
-        nn->s.CopyKeysFrom(parent->s);
-        for (uint8_t i = 0; i < parent->s.children.size(); ++i) nn->s.PushChild(parent->s.Chld(i));
-        for (uint8_t i = 0; i < parent->s.child_leaves.size(); ++i) nn->s.PushLeaf(parent->s.Lf(i));
         std::string sep(right->Rec(0), right->KeyLen(0));
-        nn->s.SetChild(static_cast<uint8_t>(child_idx), nullptr);
-        nn->s.SetLeaf(static_cast<uint8_t>(child_idx), left);
-        nn->s.InsChild(static_cast<uint8_t>(child_idx + 1), nullptr);
-        nn->s.InsLeaf(static_cast<uint8_t>(child_idx + 1), right);
-        nn->s.InsKey(static_cast<uint8_t>(child_idx), sep);
 
-        if (nn->s.KeyCount() < kInternalFanout) {
-            while (!TryLock(parent->version)) {}
-            for (LeafPage* p = first_leaf_; p; p = p->next)
-                if (p->next == leaf) { p->next = left; break; }
-            if (first_leaf_ == leaf) first_leaf_ = left;
-            parent->s.SwapAll(nn->s);
-            UnlockAndBump(parent->version);
-            RetireLeaf(leaf);
-            return;
-        }
-
-        // Cascade: split nn, ascend through ancestors
-        uint32_t cmid = nn->s.KeyCount() / 2;
-        InternalNode* il = NewInternal();
-        InternalNode* ir = NewInternal();
-        il->s.ResizeKeys(0);
-        for (uint8_t i = 0; i < cmid; ++i) il->s.PushKey(nn->s.KeyStr(i));
-        for (uint8_t i = 0; i <= cmid; ++i) { il->s.PushChild(nn->s.Chld(i)); il->s.PushLeaf(nn->s.Lf(i)); }
-        ir->s.ResizeKeys(0);
-        for (uint8_t i = cmid + 1; i < nn->s.KeyCount(); ++i) ir->s.PushKey(nn->s.KeyStr(i));
-        for (uint8_t i = cmid + 1; i <= nn->s.KeyCount(); ++i) { ir->s.PushChild(nn->s.Chld(i)); ir->s.PushLeaf(nn->s.Lf(i)); }
-        std::string csep = nn->s.KeyStr(static_cast<uint8_t>(cmid));
-
-        for (LeafPage* p = first_leaf_; p; p = p->next)
-            if (p->next == leaf) { p->next = left; break; }
-        if (first_leaf_ == leaf) first_leaf_ = left;
-
+        LeafPage* cur_leaf_l = left;
+        LeafPage* cur_leaf_r = right;
+        InternalNode* cur_node_l = nullptr;
+        InternalNode* cur_node_r = nullptr;
+        bool pair_is_leaf = true;
+        InternalNode* nn = nullptr;
         bool placed = false;
-        for (int lv = static_cast<int>(path.size()) - 2; lv >= 0; --lv) {
+
+        for (int lv = static_cast<int>(path.size()) - 1; lv >= 0; --lv) {
             InternalNode* cp = path[static_cast<size_t>(lv)];
+            uint32_t cidx = indices[static_cast<size_t>(lv)];
             nn = NewInternal();
             nn->s.CopyKeysFrom(cp->s);
             for (uint8_t i = 0; i < cp->s.children.size(); ++i) nn->s.PushChild(cp->s.Chld(i));
             for (uint8_t i = 0; i < cp->s.child_leaves.size(); ++i) nn->s.PushLeaf(cp->s.Lf(i));
-            uint32_t cidx = indices[static_cast<size_t>(lv)];
-            nn->s.SetChild(static_cast<uint8_t>(cidx), il);
-            nn->s.SetLeaf(static_cast<uint8_t>(cidx), nullptr);
-            nn->s.InsChild(static_cast<uint8_t>(cidx + 1), ir);
-            nn->s.InsLeaf(static_cast<uint8_t>(cidx + 1), nullptr);
-            nn->s.InsKey(static_cast<uint8_t>(cidx), csep);
+
+            if (pair_is_leaf) {
+                nn->s.SetChild(static_cast<uint8_t>(cidx), nullptr);
+                nn->s.SetLeaf(static_cast<uint8_t>(cidx), cur_leaf_l);
+                nn->s.InsChild(static_cast<uint8_t>(cidx + 1), nullptr);
+                nn->s.InsLeaf(static_cast<uint8_t>(cidx + 1), cur_leaf_r);
+            } else {
+                nn->s.SetChild(static_cast<uint8_t>(cidx), cur_node_l);
+                nn->s.SetLeaf(static_cast<uint8_t>(cidx), nullptr);
+                nn->s.InsChild(static_cast<uint8_t>(cidx + 1), cur_node_r);
+                nn->s.InsLeaf(static_cast<uint8_t>(cidx + 1), nullptr);
+            }
+            nn->s.InsKey(static_cast<uint8_t>(cidx), sep);
 
             if (nn->s.KeyCount() < kInternalFanout) {
                 while (!TryLock(cp->version)) {}
@@ -312,23 +290,34 @@ private:
                 UnlockAndBump(cp->version);
                 placed = true; break;
             }
-            // overflow — split again
-            cmid = nn->s.KeyCount() / 2;
-            il = NewInternal(); ir = NewInternal();
-            il->s.ResizeKeys(0);
-            for (uint8_t i = 0; i < cmid; ++i) il->s.PushKey(nn->s.KeyStr(i));
-            for (uint8_t i = 0; i <= cmid; ++i) { il->s.PushChild(nn->s.Chld(i)); il->s.PushLeaf(nn->s.Lf(i)); }
-            ir->s.ResizeKeys(0);
-            for (uint8_t i = cmid + 1; i < nn->s.KeyCount(); ++i) ir->s.PushKey(nn->s.KeyStr(i));
-            for (uint8_t i = cmid + 1; i <= nn->s.KeyCount(); ++i) { ir->s.PushChild(nn->s.Chld(i)); ir->s.PushLeaf(nn->s.Lf(i)); }
-            csep = nn->s.KeyStr(static_cast<uint8_t>(cmid));
+
+            // overflow — split nn into internal-node pair
+            mid = nn->s.KeyCount() / 2;
+            cur_node_l = NewInternal(); cur_node_r = NewInternal();
+            cur_node_l->s.ResizeKeys(0);
+            for (uint8_t i = 0; i < mid; ++i) cur_node_l->s.PushKey(nn->s.KeyStr(i));
+            for (uint8_t i = 0; i <= mid; ++i) { cur_node_l->s.PushChild(nn->s.Chld(i)); cur_node_l->s.PushLeaf(nn->s.Lf(i)); }
+            cur_node_r->s.ResizeKeys(0);
+            for (uint8_t i = mid + 1; i < nn->s.KeyCount(); ++i) cur_node_r->s.PushKey(nn->s.KeyStr(i));
+            for (uint8_t i = mid + 1; i <= nn->s.KeyCount(); ++i) { cur_node_r->s.PushChild(nn->s.Chld(i)); cur_node_r->s.PushLeaf(nn->s.Lf(i)); }
+            sep = nn->s.KeyStr(static_cast<uint8_t>(mid));
+            pair_is_leaf = false;
         }
+
+        for (LeafPage* p = first_leaf_; p; p = p->next)
+            if (p->next == leaf) { p->next = left; break; }
+        if (first_leaf_ == leaf) first_leaf_ = left;
 
         if (!placed) {
             InternalNode* nr = NewInternal();
-            nr->s.PushKey(csep);
-            nr->s.PushChild(il); nr->s.PushLeaf(nullptr);
-            nr->s.PushChild(ir); nr->s.PushLeaf(nullptr);
+            nr->s.PushKey(sep);
+            if (pair_is_leaf) {
+                nr->s.PushChild(nullptr); nr->s.PushLeaf(cur_leaf_l);
+                nr->s.PushChild(nullptr); nr->s.PushLeaf(cur_leaf_r);
+            } else {
+                nr->s.PushChild(cur_node_l); nr->s.PushLeaf(nullptr);
+                nr->s.PushChild(cur_node_r); nr->s.PushLeaf(nullptr);
+            }
             root_ = nr;
         }
 
@@ -509,7 +498,7 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
         return;
     }
 
-    SplitCoW(leaf, path.back(), indices.back(), path, indices,
+    SplitCoW(leaf, path, indices,
              key, value, timestamp, large, is_tombstone, pos);
     if (!found) count_++;
     memory_usage_ += es;
