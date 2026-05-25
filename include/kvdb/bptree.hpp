@@ -295,9 +295,6 @@ inline BPlusTree::LeafPage* BPlusTree::FindLeafForWrite(
 inline void BPlusTree::SplitLeaf(
     LeafPage* leaf, InternalNode* parent, uint32_t child_idx,
     std::vector<InternalNode*>& path, std::vector<uint32_t>& indices) {
-    while (!TryLock(leaf->version)) {}
-    while (!TryLock(parent->version)) {}
-
     LeafPage* nl = NewLeaf();
     uint32_t mid = leaf->count / 2;
     for (uint32_t i = mid; i < leaf->count; ++i) {
@@ -325,16 +322,10 @@ inline void BPlusTree::SplitLeaf(
         parent->children.begin() + static_cast<ptrdiff_t>(child_idx) + 1, nullptr);
     parent->keys.insert(
         parent->keys.begin() + static_cast<ptrdiff_t>(child_idx), sep);
-
-    UnlockAndBump(parent->version);
-    UnlockAndBump(leaf->version);
-
     if (parent->keys.size() >= kInternalFanout) SplitInternal(parent, path, indices);
 }
 inline void BPlusTree::SplitInternal(
     InternalNode* node, std::vector<InternalNode*>& path, std::vector<uint32_t>& indices) {
-    while (!TryLock(node->version)) {}
-
     InternalNode* nn = NewInternal();
     uint32_t mid = node->keys.size() / 2;
     std::string mid_key = node->keys[mid];
@@ -352,15 +343,11 @@ inline void BPlusTree::SplitInternal(
         nr->children.push_back(node); nr->child_leaves.push_back(nullptr);
         nr->children.push_back(nn); nr->child_leaves.push_back(nullptr);
         root_ = nr;
-        UnlockAndBump(node->version);
     } else {
         InternalNode* p = path[path.size()-2]; uint32_t idx = indices[indices.size()-2];
-        while (!TryLock(p->version)) {}
         p->keys.insert(p->keys.begin() + static_cast<ptrdiff_t>(idx), mid_key);
         p->children.insert(p->children.begin() + static_cast<ptrdiff_t>(idx) + 1, nn);
         p->child_leaves.insert(p->child_leaves.begin() + static_cast<ptrdiff_t>(idx) + 1, nullptr);
-        UnlockAndBump(p->version);
-        UnlockAndBump(node->version);
         if (p->keys.size() >= kInternalFanout) { path.pop_back(); indices.pop_back(); SplitInternal(p, path, indices); }
     }
 }
