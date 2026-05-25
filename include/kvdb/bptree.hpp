@@ -128,6 +128,20 @@ struct InternalNode {
             std::memcpy(key_lens,src.key_lens,sizeof(key_lens));
             std::memcpy(key_data,src.key_data,key_data_end);
         }
+        InternalNode* Chld(uint8_t i) const { return children[i]; }
+        LeafPage* Lf(uint8_t i) const { return child_leaves[i]; }
+        void SetChild(uint8_t i, InternalNode* c) { children[i] = c; }
+        void SetLeaf(uint8_t i, LeafPage* l) { child_leaves[i] = l; }
+        void InsChild(uint8_t pos, InternalNode* c) { children.insert(children.begin()+pos, c); }
+        void InsLeaf(uint8_t pos, LeafPage* l) { child_leaves.insert(child_leaves.begin()+pos, l); }
+        void PushChild(InternalNode* c) { children.push_back(c); }
+        void PushLeaf(LeafPage* l) { child_leaves.push_back(l); }
+        void SwapAll(Store& o) {
+            Store tmp; tmp.CopyKeysFrom(*this); CopyKeysFrom(o); o.CopyKeysFrom(tmp);
+            for (uint8_t i=0;i<children.size();++i) std::swap(children[i],o.children[i]);
+            for (uint8_t i=0;i<child_leaves.size();++i) std::swap(child_leaves[i],o.child_leaves[i]);
+            std::swap(children.n,o.children.n); std::swap(child_leaves.n,o.child_leaves.n);
+        }
     };
         Store s;
         std::atomic<uint64_t> version{0};
