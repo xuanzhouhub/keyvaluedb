@@ -373,33 +373,43 @@ inline bool BPlusTree::LeafPage::InsertEntry(
 }
 
 inline BPlusTree::LeafPage* BPlusTree::FindLeaf(const std::string& key) const {
-    for (;;) {
-        InternalNode* node = root_;
-        if (!node) return nullptr;
-        LeafPage* leaf = nullptr;
-        bool valid = true;
-        while (node && valid) {
-            uint64_t v1 = ReadVersion(node->version);
-            if (IsLocked(v1)) continue;
-            uint32_t idx = node->FindChild(key);
-            if (node->children[idx] == nullptr)
-                leaf = node->child_leaves[idx];
-            InternalNode* next = node->children[idx];
+    InternalNode* node = root_;
+    while (node) {
+        uint64_t v1 = ReadVersion(node->version);
+        if (IsLocked(v1)) continue;
+        uint32_t idx = node->FindChild(key);
+        InternalNode* next = (idx < node->children.size()) ? node->children[idx] : nullptr;
+        if (!next) {
+            LeafPage* leaf = (idx < node->child_leaves.size()) ? node->child_leaves[idx] : nullptr;
             uint64_t v2 = ReadVersion(node->version);
-            if (v1 != v2) { valid = false; break; }
-            node = next;
+            if (v1 == v2) return leaf;
+            continue;
         }
-        if (valid && leaf) return leaf;
+        uint64_t v2 = ReadVersion(node->version);
+        if (v1 != v2) continue;
+        node = next;
     }
+    return nullptr;
 }
 inline BPlusTree::LeafPage* BPlusTree::FindLeafForWrite(
     const std::string& key, std::vector<InternalNode*>& path, std::vector<uint32_t>& indices) {
     InternalNode* node = root_;
     while (node) {
+        uint64_t v1 = ReadVersion(node->version);
+        if (IsLocked(v1)) continue;
         uint32_t idx = node->FindChild(key);
         path.push_back(node); indices.push_back(idx);
-        if (node->children[idx] == nullptr) return node->child_leaves[idx];
-        node = node->children[idx];
+        InternalNode* next = (idx < node->children.size()) ? node->children[idx] : nullptr;
+        if (!next) {
+            LeafPage* leaf = (idx < node->child_leaves.size()) ? node->child_leaves[idx] : nullptr;
+            uint64_t v2 = ReadVersion(node->version);
+            if (v1 == v2) return leaf;
+            path.pop_back(); indices.pop_back();
+            continue;
+        }
+        uint64_t v2 = ReadVersion(node->version);
+        if (v1 != v2) { path.pop_back(); indices.pop_back(); continue; }
+        node = next;
     }
     return nullptr;
 }
@@ -473,8 +483,6 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
     std::vector<InternalNode*> path;
     std::vector<uint32_t> indices;
     LeafPage* leaf = FindLeafForWrite(key, path, indices);
-    // FUTURE: multi-threaded writers need full version validation during traversal.
-    // For now, single-writer guarantee ensures no concurrent mutation.
     uint32_t pos;
     bool large = (value.size() > kPageSize / 2);
     bool found = leaf->Find(key, pos);
