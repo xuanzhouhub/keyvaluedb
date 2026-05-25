@@ -231,6 +231,54 @@ private:
         std::memcpy(dst->data, src->data, 4072);
     }
 
+    // Unified split (no temp vectors): non-split + cascade in one loop
+    void SplitCoW2(LeafPage* leaf, InternalNode* parent, uint32_t child_idx,
+                   std::vector<InternalNode*>& path, std::vector<uint32_t>& indices,
+                   const std::string& key, const std::string& value, uint64_t ts,
+                   bool large, bool tomb, uint32_t pos) {
+        LeafPage* left=NewLeaf(),*right=NewLeaf();
+        uint32_t mid=leaf->count/2;
+        for(uint32_t i=0;i<mid;++i)CopyEntry(leaf,i,left,left->count);
+        for(uint32_t i=mid;i<leaf->count;++i)CopyEntry(leaf,i,right,right->count);
+        if(pos<mid)left->InsertEntry(pos,key,value,ts,large,tomb)||right->InsertEntry(right->count,key,value,ts,large,tomb);
+        else right->InsertEntry(pos-mid,key,value,ts,large,tomb)||left->InsertEntry(left->count,key,value,ts,large,tomb);
+        left->next=right;right->next=leaf->next;
+        std::string sep(right->Rec(0),right->KeyLen(0));
+
+        InternalNode* nn=NewInternal();
+        nn->s.CopyKeysFrom(parent->s);
+        for(uint8_t i=0;i<parent->s.children.size();++i)nn->s.PushChild(parent->s.Chld(i));
+        for(uint8_t i=0;i<parent->s.child_leaves.size();++i)nn->s.PushLeaf(parent->s.Lf(i));
+        nn->s.SetChild(static_cast<uint8_t>(child_idx),nullptr);
+        nn->s.SetLeaf(static_cast<uint8_t>(child_idx),left);
+        nn->s.InsChild(static_cast<uint8_t>(child_idx+1),nullptr);
+        nn->s.InsLeaf(static_cast<uint8_t>(child_idx+1),right);
+        nn->s.InsKey(static_cast<uint8_t>(child_idx),sep);
+
+        if(nn->s.KeyCount()<kInternalFanout){
+            while(!TryLock(parent->version)){}
+            parent->s.SwapAll(nn->s);
+            UnlockAndBump(parent->version);
+        } else {
+            // Cascade — always create new root (grandparent loop TODO)
+            uint32_t cm=nn->s.KeyCount()/2;
+            InternalNode* il=NewInternal(),*ir=NewInternal();
+            for(uint8_t i=0;i<cm;++i)il->s.PushKey(nn->s.KeyStr(i));
+            for(uint8_t i=0;i<=cm;++i){il->s.PushChild(nn->s.Chld(i));il->s.PushLeaf(nn->s.Lf(i));}
+            for(uint8_t i=cm+1;i<nn->s.KeyCount();++i)ir->s.PushKey(nn->s.KeyStr(i));
+            for(uint8_t i=cm+1;i<=nn->s.KeyCount();++i){ir->s.PushChild(nn->s.Chld(i));ir->s.PushLeaf(nn->s.Lf(i));}
+            std::string csep=nn->s.KeyStr(static_cast<uint8_t>(cm));
+            InternalNode* nr=NewInternal();
+            nr->s.PushKey(csep);nr->s.PushChild(il);nr->s.PushLeaf(nullptr);
+            nr->s.PushChild(ir);nr->s.PushLeaf(nullptr);
+            root_=nr;
+        }
+
+        for(LeafPage* p=first_leaf_;p;p=p->next)if(p->next==leaf){p->next=left;break;}
+        if(first_leaf_==leaf)first_leaf_=left;
+        RetireLeaf(leaf);
+    }
+
     void SplitCoW(LeafPage* leaf, InternalNode* parent, uint32_t child_idx,
                   std::vector<InternalNode*>& path, std::vector<uint32_t>& indices,
                   const std::string& key, const std::string& value, uint64_t ts,
