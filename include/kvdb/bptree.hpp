@@ -95,31 +95,47 @@ struct StaticVec {
 
 struct InternalNode {
     struct Store {
-        std::vector<std::string> keys;
+        static constexpr size_t kKeyDataSize = 1024;
+        uint8_t key_count = 0;
+        uint16_t key_offs[kInternalFanout] = {};
+        uint16_t key_lens[kInternalFanout] = {};
+        uint16_t key_data_end = 0;
+        char key_data[kKeyDataSize] = {};
         StaticVec<InternalNode*, kInternalFanout + 1> children;
         StaticVec<LeafPage*, kInternalFanout + 1> child_leaves;
 
-        uint8_t KeyCount() const { return static_cast<uint8_t>(keys.size()); }
-        void AssignKeysFrom(std::vector<std::string>& src) { keys.swap(src); }
-        void CopyKeysTo(std::vector<std::string>& dst) const { dst = keys; }
-        const std::string& KeyRef(uint8_t i) const { return keys[i]; }
-        void InsKey(uint8_t pos, const std::string& k) { keys.insert(keys.begin()+pos, k); }
-        void PushKey(const std::string& k) { keys.push_back(k); }
-        void ResizeKeys(uint8_t n) { keys.resize(n); }
-        void AssignKeys(const std::vector<std::string>& src, uint8_t start, uint8_t end) {
-            for (uint8_t i = start; i < end; ++i) keys.push_back(src[i]);
+        uint8_t KeyCount() const { return key_count; }
+        const char* KeyPtr(uint8_t i) const { return key_data + key_offs[i]; }
+        uint16_t KeyLen(uint8_t i) const { return key_lens[i]; }
+        std::string KeyStr(uint8_t i) const { return std::string(KeyPtr(i), KeyLen(i)); }
+        const std::string& KeyRef(uint8_t i) const { static std::string tmp; tmp = KeyStr(i); return tmp; }
+        void InsKey(uint8_t pos, const std::string& k) {
+            for (uint8_t i = key_count; i > pos; --i) { key_offs[i] = key_offs[i-1]; key_lens[i] = key_lens[i-1]; }
+            uint16_t len = static_cast<uint16_t>(k.size());
+            key_offs[pos] = key_data_end; key_lens[pos] = len;
+            std::memcpy(key_data + key_data_end, k.data(), len);
+            key_data_end += len;
+            ++key_count;
+        }
+        void PushKey(const std::string& k) { InsKey(key_count, k); }
+        void ResizeKeys(uint8_t n) { key_count = n; if (n > 0) key_data_end = key_offs[n-1] + key_lens[n-1]; else key_data_end = 0; }
+        void AssignKeysFrom(std::vector<std::string>& src) {
+            key_count = 0; key_data_end = 0;
+            for (auto& k : src) PushKey(k);
+        }
+        void CopyKeysTo(std::vector<std::string>& dst) const {
+            dst.clear();
+            for (uint8_t i = 0; i < key_count; ++i) dst.push_back(KeyStr(i));
         }
     };
         Store s;
         std::atomic<uint64_t> version{0};
 
-    InternalNode() {
-        s.keys.reserve(kInternalFanout);
-    }
+    InternalNode() {}
 
         uint32_t FindChild(const std::string& key) const {
-            uint32_t lo = 0, hi = static_cast<uint32_t>(s.keys.size());
-            while (lo < hi) { uint32_t mid = (lo+hi)/2; if (key < s.keys[mid]) hi=mid; else lo=mid+1; }
+            uint32_t lo = 0, hi = s.KeyCount();
+            while (lo < hi) { uint32_t mid = (lo+hi)/2; if (key < s.KeyStr(static_cast<uint8_t>(mid))) hi=mid; else lo=mid+1; }
             return lo;
         }
     };
@@ -478,8 +494,7 @@ inline void BPlusTree::SplitLeaf(
         parent->s.child_leaves.begin() + static_cast<ptrdiff_t>(child_idx) + 1, nl);
     parent->s.children.insert(
         parent->s.children.begin() + static_cast<ptrdiff_t>(child_idx) + 1, nullptr);
-    parent->s.keys.insert(
-        parent->s.keys.begin() + static_cast<ptrdiff_t>(child_idx), sep);
+    parent->s.InsKey(static_cast<uint8_t>(child_idx), sep);
     UnlockAndBump(parent->version);
     if (parent->s.KeyCount() >= kInternalFanout) SplitInternal(parent, path, indices);
 }
