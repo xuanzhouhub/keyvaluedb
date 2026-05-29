@@ -14,7 +14,11 @@ namespace kvdb {
 
 class MemTable {
 public:
-    explicit MemTable(uint64_t id, size_t max_bytes = Config::kDefaultMemTableMaxBytes);
+    explicit MemTable(uint64_t id, size_t max_bytes = Config::kDefaultMemTableMaxBytes,
+                      std::atomic<uint64_t>* fence_source = nullptr)
+        : tree_(fence_source), id_(id), max_bytes_(max_bytes), frozen_(false) {}
+
+    void DrainRetired(uint64_t min_ts) { tree_.DrainRetired(min_ts); }
 
     MemTable(const MemTable&) = delete;
     MemTable& operator=(const MemTable&) = delete;

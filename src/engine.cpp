@@ -301,7 +301,7 @@ void LSMTreeEngine::RecoverFromWAL() {
         if (active_memtable_->IsFull()) {
             auto frozen = active_memtable_;
             frozen->Freeze();
-            active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_);
+            active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_, &global_ts_);
             DoFlush(frozen);
             wal_->WriteCheckpoint(global_ts_.load(), batch_in_progress_ ? batch_ts_ : 0);
         }
@@ -310,7 +310,7 @@ void LSMTreeEngine::RecoverFromWAL() {
     if (active_memtable_->EntryCount() > 0) {
         auto frozen = active_memtable_;
         frozen->Freeze();
-        active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_);
+        active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_, &global_ts_);
         DoFlush(frozen);
     }
 
@@ -353,6 +353,7 @@ void LSMTreeEngine::Insert(const std::string& key, const std::string& value) {
     {
         std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
         active_memtable_->Insert(key, value, ts);
+        active_memtable_->DrainRetired(tracker_.MinActiveTS());
 
         if (active_memtable_->IsFull()) {
             auto frozen = active_memtable_;
@@ -363,7 +364,7 @@ void LSMTreeEngine::Insert(const std::string& key, const std::string& value) {
                 flush_->pending++;
             }
             flush_->cv.notify_one();
-            active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_);
+            active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_, &global_ts_);
         }
     }
 
@@ -417,7 +418,7 @@ void LSMTreeEngine::Delete(const std::string& key) {
                 flush_->pending++;
             }
             flush_->cv.notify_one();
-            active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_);
+            active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_, &global_ts_);
         }
     }
 
@@ -563,7 +564,7 @@ void LSMTreeEngine::Flush() {
             flush_->pending++;
         }
         flush_->cv.notify_one();
-        active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_);
+        active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_, &global_ts_);
     }
     WaitForPendingFlushes();
 }
@@ -917,7 +918,7 @@ void LSMTreeEngine::BatchInsert(const std::string& key, const std::string& value
                 flush_->pending++;
             }
             flush_->cv.notify_one();
-            active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_);
+            active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_, &global_ts_);
         }
     }
 
@@ -958,7 +959,7 @@ void LSMTreeEngine::BatchDelete(const std::string& key) {
                 flush_->pending++;
             }
             flush_->cv.notify_one();
-            active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_);
+            active_memtable_ = std::make_shared<MemTable>(next_table_id_.fetch_add(1), memtable_max_bytes_, &global_ts_);
         }
     }
 

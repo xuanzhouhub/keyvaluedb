@@ -157,8 +157,10 @@ struct InternalNode {
         }
     };
 
-    BPlusTree();
+    BPlusTree(std::atomic<uint64_t>* fence_source = nullptr);
     ~BPlusTree();
+
+    friend class MemTable;
 
     static uint64_t ReadVersion(const std::atomic<uint64_t>& v) { return v.load(std::memory_order_acquire); }
     static bool IsLocked(uint64_t ver) { return (ver & 1) != 0; }
@@ -234,7 +236,8 @@ private:
     void RetireLeaf(LeafPage* leaf) {
         auto it = std::find(leaf_nodes_.begin(), leaf_nodes_.end(), leaf);
         if (it != leaf_nodes_.end()) leaf_nodes_.erase(it);
-        pending_retired_leaves_.push_back(leaf);
+        uint64_t f = fence_source_ ? fence_source_->load() : ++retire_seq_;
+        pending_retired_.push_back({leaf, nullptr, false, f});
     }
     void CopyLeafContent(LeafPage* dst, const LeafPage* src) {
         dst->count = src->count;
@@ -375,32 +378,60 @@ private:
     size_t memory_usage_ = 0;
     std::vector<InternalNode*> internal_nodes_;
     std::vector<LeafPage*> leaf_nodes_;
-    std::vector<LeafPage*> pending_retired_leaves_;
     std::vector<LeafPage*> leaf_pool_;
     std::vector<LeafPage*> retired_leaves_;
-    std::vector<InternalNode*> pending_retired_nodes_;
     std::unordered_set<uint64_t> aborted_batch_ts_;
     mutable std::atomic<int> active_readers_{0};
+    std::atomic<uint64_t>* fence_source_ = nullptr;
+    uint64_t retire_seq_ = 1;
+
+    struct PendingRetire {
+        LeafPage* leaf = nullptr;
+        InternalNode* internal = nullptr;
+        bool is_internal = false;
+        uint64_t fence_ts = 0;
+    };
+    std::vector<PendingRetire> pending_retired_;
 
     void DrainRetired() {
+        if (pending_retired_.size() < 64) return;
+        if (fence_source_) return;  // engine drives drain with MinActiveTS
         if (active_readers_.load(std::memory_order_acquire) != 0) return;
-        for (auto* l : pending_retired_leaves_) {
-            l->~LeafPage();
-            leaf_pool_.push_back(l);
+        DrainRetiredWithFence(UINT64_MAX);
+    }
+
+    void DrainRetired(uint64_t min_active_ts) {
+        if (pending_retired_.size() < 64) return;
+        DrainRetiredWithFence(min_active_ts);
+    }
+
+    void DrainRetiredWithFence(uint64_t min_ts) {
+        size_t keep = 0;
+        for (size_t j = 0; j < pending_retired_.size(); ++j) {
+            auto& r = pending_retired_[j];
+            if (min_ts > r.fence_ts) {
+                if (r.is_internal) { if (r.internal) delete r.internal; }
+                else { r.leaf->~LeafPage(); leaf_pool_.push_back(r.leaf); }
+            } else {
+                pending_retired_[keep++] = r;
+            }
         }
-        pending_retired_leaves_.clear();
-        for (auto* n : pending_retired_nodes_) delete n;
-        pending_retired_nodes_.clear();
-        while (leaf_pool_.size() > 64) {
-            auto* l = leaf_pool_.back(); leaf_pool_.pop_back();
-            Free(l);
-        }
+        pending_retired_.resize(keep);
+        while (leaf_pool_.size() > 64) { auto* l = leaf_pool_.back(); leaf_pool_.pop_back(); Free(l); }
     }
 
     void RetireNode(InternalNode* n) {
         auto it = std::find(internal_nodes_.begin(), internal_nodes_.end(), n);
         if (it != internal_nodes_.end()) internal_nodes_.erase(it);
-        pending_retired_nodes_.push_back(n);
+        uint64_t f = fence_source_ ? fence_source_->load() : ++retire_seq_;
+        pending_retired_.push_back({nullptr, n, true, f});
+    }
+
+    void DrainAllRetired() {
+        while (active_readers_.load(std::memory_order_acquire) > 0) { /* spin */ }
+        DrainRetiredWithFence(UINT64_MAX);
+        for (auto* l : leaf_pool_) Free(l);
+        leaf_pool_.clear();
     }
 };
 
@@ -435,7 +466,8 @@ inline BPlusTree::InternalNode* BPlusTree::NewInternal() {
     internal_nodes_.push_back(n);
     return n;
 }
-inline BPlusTree::BPlusTree() {
+inline BPlusTree::BPlusTree(std::atomic<uint64_t>* fence_source) {
+    fence_source_ = fence_source;
     LeafPage* l = NewLeaf();
     first_leaf_ = l;
     InternalNode* r = NewInternal();
@@ -444,16 +476,7 @@ inline BPlusTree::BPlusTree() {
     root_ = r;
 }
 inline BPlusTree::~BPlusTree() {
-    while (active_readers_.load(std::memory_order_acquire) > 0) { /* spin */ }
-    for (auto* l : pending_retired_leaves_) {
-        l->~LeafPage();
-        leaf_pool_.push_back(l);
-    }
-    pending_retired_leaves_.clear();
-    for (auto* n : pending_retired_nodes_) delete n;
-    pending_retired_nodes_.clear();
-    for (auto* l : leaf_pool_) { l->~LeafPage(); Free(l); }
-    leaf_pool_.clear();
+    DrainAllRetired();
     for (auto* n : leaf_nodes_) {
         for (uint32_t i = 0; i < n->count; ++i)
             if (n->ValLen(i) == kLargeValFlag) {

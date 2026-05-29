@@ -2,11 +2,6 @@
 
 namespace kvdb {
 
-MemTable::MemTable(uint64_t id, size_t max_bytes)
-    : id_(id)
-    , max_bytes_(max_bytes)
-    , frozen_(false) {}
-
 void MemTable::Insert(const std::string& key, const std::string& value, uint64_t timestamp, bool is_tombstone) {
     if (frozen_) return;
     tree_.Insert(key, value, timestamp, is_tombstone);
