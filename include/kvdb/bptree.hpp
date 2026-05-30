@@ -406,9 +406,8 @@ private:
 
     void DrainRetired() {
         if (pending_retired_.size() < 64) return;
-        if (fence_source_) return;  // engine drives drain with MinActiveTS
-        if (active_readers_.load(std::memory_order_acquire) != 0) return;
-        DrainRetiredWithFence(UINT64_MAX);
+        if (fence_source_) return;
+        // defer drain — active_readers_ gate has race window between readers
     }
 
     void DrainRetired(uint64_t min_active_ts) {
