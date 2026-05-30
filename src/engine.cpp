@@ -122,7 +122,7 @@ void LSMTreeEngine::CompactionWorkerLoop() {
 
         std::vector<SSTable::Metadata> snapshot;
         {
-            std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+            std::shared_lock<std::shared_mutex> lock(sstable_metadata_mutex_);
             snapshot = sstable_metadata_;
         }
 
@@ -174,13 +174,13 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
         std::cerr << "  [" << i << "] " << recovered_meta[i].filepath
                   << " entries=" << recovered_meta[i].entry_count << std::endl;
     {
-        std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+        std::lock_guard<std::shared_mutex> lock(sstable_metadata_mutex_);
         sstable_metadata_ = std::move(recovered_meta);
     }
     sstable_seq_ = sstable_metadata_.size();
 
     {
-        std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+        std::lock_guard<std::shared_mutex> lock(sstable_metadata_mutex_);
         for (auto& meta : sstable_metadata_) {
             if (meta.min_key.empty() || meta.max_key.empty()) {
                 try {
@@ -282,7 +282,7 @@ void LSMTreeEngine::RecoverFromWAL() {
     for (uint64_t ts : aborted_batches) {
         active_memtable_->AddAbortedBatch(ts);
         {
-            std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+            std::lock_guard<std::shared_mutex> lock(sstable_metadata_mutex_);
             for (auto& meta : sstable_metadata_)
                 meta.aborted_batch_ts.insert(ts);
         }
@@ -483,7 +483,7 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
 
         std::vector<SSTable::Metadata> metadata;
         {
-            std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+            std::shared_lock<std::shared_mutex> lock(sstable_metadata_mutex_);
             metadata = sstable_metadata_;
         }
 
@@ -582,12 +582,12 @@ void LSMTreeEngine::WaitForPendingFlushes() {
 }
 
 size_t LSMTreeEngine::SSTableCount() const {
-    std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+    std::shared_lock<std::shared_mutex> lock(sstable_metadata_mutex_);
     return sstable_metadata_.size();
 }
 
 std::vector<SSTable::Metadata> LSMTreeEngine::GetSSTableMetadata() const {
-    std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+    std::shared_lock<std::shared_mutex> lock(sstable_metadata_mutex_);
     return sstable_metadata_;
 }
 
@@ -635,7 +635,7 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
     }
 
     {
-        std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+        std::shared_lock<std::shared_mutex> lock(sstable_metadata_mutex_);
         std::map<int, std::vector<SSTable::Metadata>> groups;
         for (const auto& meta : sstable_metadata_) {
             if (!upper.IsUnbounded() && !meta.min_key.empty() && meta.min_key > upper.key) continue;
@@ -712,7 +712,7 @@ void LSMTreeEngine::DoFlush(std::shared_ptr<MemTable> frozen_memtable) {
     meta.manifest_seq = seq;
 
     {
-        std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+        std::lock_guard<std::shared_mutex> lock(sstable_metadata_mutex_);
         sstable_metadata_.push_back(meta);
     }
 
@@ -784,7 +784,7 @@ void LSMTreeEngine::DrainFileGC() {
 void LSMTreeEngine::CompactLevel(int from_level, int top_level) {
     std::vector<SSTable::Metadata> snapshot;
     {
-        std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+        std::shared_lock<std::shared_mutex> lock(sstable_metadata_mutex_);
         snapshot = sstable_metadata_;
     }
 
@@ -810,7 +810,7 @@ void LSMTreeEngine::CompactLevel(int from_level, int top_level) {
                      global_ts_.load());
 
     {
-        std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+        std::lock_guard<std::shared_mutex> lock(sstable_metadata_mutex_);
         auto& all = sstable_metadata_;
         for (auto& in : inputs) {
             all.erase(std::remove_if(all.begin(), all.end(),
@@ -878,7 +878,7 @@ bool LSMTreeEngine::AbortBatch() {
         }
 
         {
-            std::lock_guard<std::mutex> lock(sstable_metadata_mutex_);
+            std::lock_guard<std::shared_mutex> lock(sstable_metadata_mutex_);
             for (auto& meta : sstable_metadata_)
                 meta.aborted_batch_ts.insert(batch_ts_);
         }

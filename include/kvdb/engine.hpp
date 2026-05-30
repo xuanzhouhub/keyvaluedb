@@ -108,7 +108,7 @@ private:
 
     std::atomic<uint64_t> next_table_id_{0};
     std::vector<SSTable::Metadata> sstable_metadata_;
-    mutable std::mutex sstable_metadata_mutex_;
+    mutable std::shared_mutex sstable_metadata_mutex_;
 
     std::atomic<uint64_t> sstable_seq_{0};
     std::atomic<uint64_t> global_ts_{0};
