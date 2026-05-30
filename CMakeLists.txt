@@ -50,6 +50,10 @@ if(KVDB_BUILD_TESTS)
     add_kvdb_test(test_server tests/test_server.cpp)
     add_kvdb_test(test_wfw tests/test_wfw.cpp)
     add_kvdb_test(test_small tests/test_small.cpp)
+    # test_stress activates known concurrency race in Export — skip CI, run manually
+    add_executable(test_stress tests/test_stress.cpp)
+    target_link_libraries(test_stress PRIVATE kvdb_lib)
+    target_include_directories(test_stress PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     add_kvdb_test(test_restart tests/test_restart.cpp)
 endif()
 
