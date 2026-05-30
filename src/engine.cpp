@@ -294,6 +294,7 @@ void LSMTreeEngine::RecoverFromWAL() {
 
     for (const auto& kv : recovered) {
         active_memtable_->Insert(kv.key, kv.value, kv.timestamp);
+        active_memtable_->DrainRetired(tracker_.MinActiveTS());
         if (kv.timestamp > global_ts_.load()) {
             global_ts_ = kv.timestamp;
         }
@@ -350,11 +351,11 @@ void LSMTreeEngine::Insert(const std::string& key, const std::string& value) {
         sync_->ready_cv.notify_one();
     }
 
+    active_memtable_->Insert(key, value, ts);
+    active_memtable_->DrainRetired(tracker_.MinActiveTS());
+
     {
         std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
-        active_memtable_->Insert(key, value, ts);
-        active_memtable_->DrainRetired(tracker_.MinActiveTS());
-
         if (active_memtable_->IsFull()) {
             auto frozen = active_memtable_;
             frozen->Freeze();
@@ -405,10 +406,11 @@ void LSMTreeEngine::Delete(const std::string& key) {
         sync_->ready_cv.notify_one();
     }
 
+    active_memtable_->Insert(key, "", ts, true);
+    active_memtable_->DrainRetired(tracker_.MinActiveTS());
+
     {
         std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
-        active_memtable_->Insert(key, "", ts, true);
-
         if (active_memtable_->IsFull()) {
             auto frozen = active_memtable_;
             frozen->Freeze();
@@ -906,9 +908,11 @@ void LSMTreeEngine::BatchInsert(const std::string& key, const std::string& value
         sync_->ready_cv.notify_one();
     }
 
+    active_memtable_->Insert(key, value, batch_ts_, false);
+    active_memtable_->DrainRetired(tracker_.MinActiveTS());
+
     {
         std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
-        active_memtable_->Insert(key, value, batch_ts_, false);
         if (active_memtable_->IsFull()) {
             auto frozen = active_memtable_;
             frozen->Freeze();
@@ -947,9 +951,11 @@ void LSMTreeEngine::BatchDelete(const std::string& key) {
         sync_->ready_cv.notify_one();
     }
 
+    active_memtable_->Insert(key, "", batch_ts_, true);
+    active_memtable_->DrainRetired(tracker_.MinActiveTS());
+
     {
         std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
-        active_memtable_->Insert(key, "", batch_ts_, true);
         if (active_memtable_->IsFull()) {
             auto frozen = active_memtable_;
             frozen->Freeze();
