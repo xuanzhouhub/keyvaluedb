@@ -32,8 +32,8 @@
 - **Internal nodes**: `StaticVec`-based (inline key storage `key_data[1024]`), fanout 16. Contiguous single allocation.
 - **Lock-free reads**: SeqLock version check on internal nodes, immutable leaves (CoW).
 - **CoW writes**: Pre-built sub-tree, one spinlock + one pointer write per operation. Unified `SplitCoW` handles all levels.
-- **EBR**: `ReadGuard` announces readers; retired nodes stamped with fence timestamp; `DrainRetired` reclaims when safe.
-- **Leaf pool**: 64 pooled 4KB leaves, placement-new reuse — eliminates `_aligned_malloc` per insert.
+- **EBR**: `ReadGuard` announces readers; retired nodes stamped with fence timestamp; `DrainRetired(MinActiveTS)` reclaims when oldest reader has passed the fence. **Counter-based drain (active_readers_ == 0) is a TOCTOU race — must never gate node freeing.** Drain only via timestamp comparison or at destructor.
+- **Leaf pool**: 64 pooled 4KB leaves, placement-new reuse — eliminates `_aligned_malloc` per insert. Pool replenished only at destructor or engine-driven drain.
 - **Leaf chain range scan**: `MemTableSource` lazy iterates via `MemTableWalk` — no full materialization. `ExportEntries()` retained for tests only. `WriteFromWalk` uses `MemTableWalk` directly for flush.
 - **Blob values**: `> page/2` stored as external blobs. Blob cleanup in destructor (MSVC codegen limitation).
 - **MVCC**: `Find()` returns leftmost match; new versions inserted left. `Lookup()` scans for visible timestamp.
