@@ -34,7 +34,7 @@
 - **CoW writes**: Pre-built sub-tree, one spinlock + one pointer write per operation. Unified `SplitCoW` handles all levels.
 - **EBR**: `ReadGuard` announces readers; retired nodes stamped with fence timestamp; `DrainRetired` reclaims when safe.
 - **Leaf pool**: 64 pooled 4KB leaves, placement-new reuse — eliminates `_aligned_malloc` per insert.
-- **Leaf chain range scan**: `MemTableSource` lazy iterates — no full memtable copy for active memtable.
+- **Leaf chain range scan**: `MemTableSource` lazy iterates via `MemTableWalk` — no full materialization. `ExportEntries()` retained for tests only. `WriteFromWalk` uses `MemTableWalk` directly for flush.
 - **Blob values**: `> page/2` stored as external blobs. Blob cleanup in destructor (MSVC codegen limitation).
 - **MVCC**: `Find()` returns leftmost match; new versions inserted left. `Lookup()` scans for visible timestamp.
 
@@ -53,7 +53,7 @@
 - **Range filter**: `min_key` / `max_key` — `key < min || key > max → skip`.
 - **Compression**: `kCompressionSnappy` active — hash-based LZ77, ~2x ratio, block-level.
 - **Entry format**: `[KeyLen:4B][Key][ValueLen:4B][Value][Timestamp:8B][Flags:1B]` — bit 0 = tombstone (`fl&1`). `kLargeValFlag=0x7FFF` to avoid conflict with tombstone bit 15 (`0x8000`).
-- **Export dedup**: `WriteFromWalk` picks the highest-timestamp version for each key across leaf boundaries (MVCC versions may span multiple leaves after splits).
+- **Blob values**: `> page/2` stored as external blobs. Blob pointers shared across CoW copies (no re-allocation). `blob_ptrs_` set tracks allocations.
 
 ### Metadata
 - `SSTable::Metadata` includes `manifest_seq` (uint64_t) — the sequence number assigned at flush/compaction time. Used as cache key instead of filepath.

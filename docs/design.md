@@ -48,7 +48,7 @@ Client (TCP)
 ### MemTable (B+-tree)
 - **Leaf page**: 4KB aligned slab (`_aligned_malloc`), slotted page layout
 - Slot directory (14B/entry) grows right, records grow left from top
-- Linked leaves for O(n) ordered export
+- Linked leaves for O(n) ordered iteration via `MemTableWalk`
 - Internal nodes: `StaticVec`-based, fanout 16, inline key storage (1024B)
 - Values > 2KB stored as external blobs
 - **Leaves are immutable** (Copy-on-Write) — never modified in place
