@@ -330,21 +330,19 @@ private:
         pair_is_leaf = false;
     }
 
-    // ---- ONE LOCK: replace pointer in parent ----
+        // ---- ONE LOCK: replace pointer in parent ----
         if (placed) {
+            for (LeafPage* p = first_leaf_; p; p = p->next)
+                if (p->next == leaf) { p->next = left; break; }
+            if (first_leaf_ == leaf) first_leaf_ = left;
+
             if (lock_node) {
                 while (!TryLock(lock_node->version)) {}
-                for (LeafPage* p = first_leaf_; p; p = p->next)
-                    if (p->next == leaf) { p->next = left; break; }
-                if (first_leaf_ == leaf) first_leaf_ = left;
                 InternalNode* old_node = lock_node->s.children[lock_idx];
                 lock_node->s.children[lock_idx] = saved_nn;
                 UnlockAndBump(lock_node->version);
                 if (old_node) RetireNode(old_node);
             } else {
-                for (LeafPage* p = first_leaf_; p; p = p->next)
-                    if (p->next == leaf) { p->next = left; break; }
-                if (first_leaf_ == leaf) first_leaf_ = left;
                 InternalNode* old_root = root_;
                 root_ = saved_nn;
                 if (old_root) RetireNode(old_root);
@@ -595,18 +593,16 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
             std::memcpy(&bp, nleaf->Rec(tp) + nleaf->KeyLen(tp), sizeof(void*));
             blob_ptrs_.insert(bp);
         }
+        for (LeafPage* p = first_leaf_; p; p = p->next)
+            if (p->next == leaf) { p->next = nleaf; break; }
+        if (first_leaf_ == leaf) first_leaf_ = nleaf;
+
         if (!path.empty()) {
             while (!TryLock(path.back()->version)) {}
-            for (LeafPage* p = first_leaf_; p; p = p->next)
-                if (p->next == leaf) { p->next = nleaf; break; }
-            if (first_leaf_ == leaf) first_leaf_ = nleaf;
             path.back()->s.child_leaves[indices.back()] = nleaf;
             UnlockAndBump(path.back()->version);
         }
         else {
-            for (LeafPage* p = first_leaf_; p; p = p->next)
-                if (p->next == leaf) { p->next = nleaf; break; }
-            if (first_leaf_ == leaf) first_leaf_ = nleaf;
             auto* nr = NewInternal(); nr->s.child_leaves.push_back(nleaf); root_ = nr;
         }
         RetireLeaf(leaf);
