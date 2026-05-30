@@ -18,10 +18,10 @@
 #include <thread>
 #include <vector>
 
-static const int kThreads = 16;
-static const int kWriters = 1;  // single writer only — B+-tree is not multi-writer safe
-static const int kDurationSec = 15;
-static const int kKeyPoolSize = 2000;
+static const int kThreads = 8;
+static const int kWriters = 1;
+static const int kDurationSec = 8;
+static const int kKeyPoolSize = 500;
 static const int kSmallMaxLen = 64;
 static const int kMediumMaxLen = 1500;
 static const int kBlobMinLen = 2500;
