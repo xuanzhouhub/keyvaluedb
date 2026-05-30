@@ -28,20 +28,6 @@ struct SourceIterator {
     virtual ~SourceIterator() = default;
 };
 
-struct VectorIterator : SourceIterator {
-    std::vector<KeyValuePair> entries;
-    size_t pos = 0;
-    VectorIterator(std::vector<KeyValuePair> e) : entries(std::move(e)) {}
-    bool Valid() const override { return pos < entries.size(); }
-    const KeyValuePair& Current() const override { return entries[pos]; }
-    void Next() override { ++pos; }
-    void SeekToKey(const std::string& key) override {
-        auto it = std::lower_bound(entries.begin(), entries.end(), key,
-            [](const KeyValuePair& a, const std::string& k) { return a.key < k; });
-        pos = static_cast<size_t>(it - entries.begin());
-    }
-};
-
 struct MemTableSource : SourceIterator {
     std::shared_ptr<MemTable> ref;
     BPlusTree::ReadGuard guard;

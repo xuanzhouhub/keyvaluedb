@@ -392,7 +392,6 @@ private:
     std::vector<InternalNode*> internal_nodes_;
     std::vector<LeafPage*> leaf_nodes_;
     std::vector<LeafPage*> leaf_pool_;
-    std::vector<LeafPage*> retired_leaves_;
     std::unordered_set<uint64_t> aborted_batch_ts_;
     std::unordered_set<void*> blob_ptrs_;
     mutable std::atomic<int> active_readers_{0};
