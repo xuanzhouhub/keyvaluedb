@@ -68,7 +68,8 @@ public:
 
         bool InsertEntry(uint32_t pos, const std::string& key,
                          const std::string& value, uint64_t timestamp,
-                         bool store_blob, bool is_tombstone = false);
+                         bool store_blob, bool is_tombstone = false,
+                         void* blob_ptr = nullptr);
     };
 
 template<typename T, size_t N>
@@ -266,6 +267,13 @@ private:
         else
             right->InsertEntry(pos - mid, key, value, ts, large, tomb)
                 || left->InsertEntry(left->count, key, value, ts, large, tomb);
+        if (large) {
+            LeafPage* dst = (pos < mid) ? left : right;
+            uint32_t p = (pos < mid) ? pos : (pos - mid);
+            void* bp;
+            std::memcpy(&bp, dst->Rec(p) + dst->KeyLen(p), sizeof(void*));
+            blob_ptrs_.insert(bp);
+        }
         left->next = right;
         right->next = leaf->next;
         std::string sep(right->Rec(0), right->KeyLen(0));
@@ -356,14 +364,13 @@ private:
         bool blob = (src->ValLen(i) == kLargeValFlag);
         std::string k(src->Rec(i), src->KeyLen(i));
         std::string v;
+        void* bp = nullptr;
         if (blob) {
-            void* ptr; std::memcpy(&ptr, src->Rec(i) + src->KeyLen(i), sizeof(void*));
-            size_t sz; std::memcpy(&sz, ptr, 8);
-            v.assign(static_cast<const char*>(ptr) + 8, sz);
+            std::memcpy(&bp, src->Rec(i) + src->KeyLen(i), sizeof(void*));
         } else {
             v.assign(src->Rec(i) + src->KeyLen(i), src->ValLen(i));
         }
-        dst->InsertEntry(pos, k, v, src->Timestamp(i), blob, src->IsTombstone(i));
+        dst->InsertEntry(pos, k, v, src->Timestamp(i), blob, src->IsTombstone(i), bp);
     }
     LeafPage* NewLeaf();
     InternalNode* NewInternal();
@@ -381,6 +388,7 @@ private:
     std::vector<LeafPage*> leaf_pool_;
     std::vector<LeafPage*> retired_leaves_;
     std::unordered_set<uint64_t> aborted_batch_ts_;
+    std::unordered_set<void*> blob_ptrs_;
     mutable std::atomic<int> active_readers_{0};
     std::atomic<uint64_t>* fence_source_ = nullptr;
     uint64_t retire_seq_ = 1;
@@ -478,19 +486,16 @@ inline BPlusTree::BPlusTree(std::atomic<uint64_t>* fence_source) {
 inline BPlusTree::~BPlusTree() {
     DrainAllRetired();
     for (auto* n : leaf_nodes_) {
-        for (uint32_t i = 0; i < n->count; ++i)
-            if (n->ValLen(i) == kLargeValFlag) {
-                void* blob; std::memcpy(&blob, n->Rec(i) + n->KeyLen(i), sizeof(void*));
-                Free(blob);
-            }
         n->~LeafPage(); Free(n);
     }
+    for (auto* p : blob_ptrs_) Free(p);
     for (auto* n : internal_nodes_) delete n;
 }
 
 inline bool BPlusTree::LeafPage::InsertEntry(
     uint32_t pos, const std::string& key, const std::string& value,
-    uint64_t timestamp, bool store_blob, bool is_tombstone) {
+    uint64_t timestamp, bool store_blob, bool is_tombstone,
+    void* blob_ptr) {
     uint32_t val_sz = store_blob ? 8 : static_cast<uint32_t>(value.size());
     uint32_t rec_sz = static_cast<uint32_t>(key.size()) + val_sz;
     uint32_t needed = rec_sz + kSlotSize;
@@ -499,11 +504,16 @@ inline bool BPlusTree::LeafPage::InsertEntry(
     uint16_t rec_off = static_cast<uint16_t>(data_start - rec_sz);
     std::memcpy(Raw() + rec_off, key.data(), key.size());
     if (store_blob) {
-        size_t sz = value.size();
-        void* blob = Alloc(sz + 8, 16);
-        std::memcpy(blob, &sz, 8);
-        std::memcpy(static_cast<char*>(blob) + 8, value.data(), sz);
-        std::memcpy(Raw() + rec_off + key.size(), &blob, sizeof(void*));
+        if (blob_ptr) {
+            std::memcpy(Raw() + rec_off + key.size(), &blob_ptr, sizeof(void*));
+        } else {
+            size_t sz = value.size();
+            void* blob = Alloc(sz + 8, 16);
+            std::memcpy(blob, &sz, 8);
+            std::memcpy(static_cast<char*>(blob) + 8, value.data(), sz);
+            blob_ptr = blob;
+            std::memcpy(Raw() + rec_off + key.size(), &blob, sizeof(void*));
+        }
     } else {
         std::memcpy(Raw() + rec_off + key.size(), value.data(), value.size());
     }
@@ -572,6 +582,14 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
     LeafPage* nleaf = NewLeaf();
     CopyLeafContent(nleaf, leaf);
     if (nleaf->InsertEntry(pos, key, value, timestamp, large, is_tombstone)) {
+        if (large) {
+            void* bp;
+            uint32_t tp = pos;
+            // Find the inserted entry's actual position (may differ due to Find)
+            if (found) tp = pos;
+            std::memcpy(&bp, nleaf->Rec(tp) + nleaf->KeyLen(tp), sizeof(void*));
+            blob_ptrs_.insert(bp);
+        }
         for (LeafPage* p = first_leaf_; p; p = p->next)
             if (p->next == leaf) { p->next = nleaf; break; }
         if (!path.empty()) {
