@@ -404,12 +404,6 @@ private:
     };
     std::vector<PendingRetire> pending_retired_;
 
-    void DrainRetired() {
-        if (pending_retired_.size() < 64) return;
-        if (fence_source_) return;
-        // defer drain — active_readers_ gate has race window between readers
-    }
-
     void DrainRetired(uint64_t min_active_ts) {
         if (pending_retired_.size() < 64) return;
         DrainRetiredWithFence(min_active_ts);
@@ -607,7 +601,6 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
         RetireLeaf(leaf);
         if (!found) count_++;
         memory_usage_ += es;
-        DrainRetired();
         return;
     }
 
@@ -615,7 +608,6 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
              key, value, timestamp, large, is_tombstone, pos);
     if (!found) count_++;
     memory_usage_ += es;
-    DrainRetired();
 }
 inline bool BPlusTree::Lookup(const std::string& key, uint64_t read_ts, std::string& value_out) const {
     ReadGuard guard(this);
