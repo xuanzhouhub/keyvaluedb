@@ -620,9 +620,9 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
         frozen_snapshot = frozen_memtables_;
     }
     if (active_snapshot->EntryCount() > 0) {
-        auto vi = std::make_unique<VectorIterator>(active_snapshot->ExportEntries());
-        if (!lower.IsUnbounded()) vi->SeekToKey(lower.key);
-        if (vi->Valid()) sources.push_back(std::move(vi));
+        auto ms = std::make_unique<MemTableSource>(active_snapshot);
+        if (!lower.IsUnbounded()) ms->SeekToKey(lower.key);
+        if (ms->Valid()) sources.push_back(std::move(ms));
     }
     for (const auto& m : frozen_snapshot) {
         if (m->EntryCount() > 0) {

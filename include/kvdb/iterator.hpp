@@ -43,12 +43,15 @@ struct VectorIterator : SourceIterator {
 };
 
 struct MemTableSource : SourceIterator {
-    std::shared_ptr<MemTable> ref;   // keep memtable alive
+    std::shared_ptr<MemTable> ref;
+    BPlusTree::ReadGuard guard;
     BPlusTree::MemTableWalk walk;
     KeyValuePair current_;
 
     MemTableSource(std::shared_ptr<MemTable> memtable)
-        : ref(std::move(memtable)), walk(ref->GetTree()) {
+        : ref(std::move(memtable))
+        , guard(&ref->GetTree())   // EBR: prevent tree from retiring leaves under us
+        , walk(ref->GetTree()) {
         if (walk.Valid()) { current_.key = walk.Key(); current_.value = walk.Value(); current_.timestamp = walk.Timestamp(); }
     }
     bool Valid() const override { return walk.Valid(); }
