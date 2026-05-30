@@ -28,11 +28,23 @@
 ## Current Status: All steps complete (Steps 1–8)
 
 ### MemTable
-- **B+-tree** (contiguous-page): `LeafPage` 4KB `_aligned_malloc`, `alignas(4096)`. Slotted page: slot directory (14B/entry) + inline records. Linked leaf chain for O(n) ordered export. `MemTableWalk` skips leaves with `count=0` (can occur after splits). `Free()` returns 0 when `data_start < slot_end` to prevent unsigned wrap-around.
-- **Internal nodes**: `std::vector`-based (keys, children, child_leaves), fanout 16.
-- **Blob values**: `> page/2` stored as `[size:8B][data]` external blob. Pointer stored inline.
-- **MVCC**: `Find()` returns leftmost match; new versions inserted left (`[newest, ..., oldest]`). `Lookup()` scans right for first visible timestamp. `memory_usage_` tracks physical entries (including old versions) so `IsFull()` triggers correctly.
-- Prefix compression scaffold (`prefix`, `FullKey()` — activation pending).
+- **B+-tree** (contiguous-page, lock-free): `LeafPage` 4KB `_aligned_malloc`, `alignas(4096)`. Slotted page. Linked leaf chain.
+- **Internal nodes**: `StaticVec`-based (inline key storage `key_data[1024]`), fanout 16. Contiguous single allocation.
+- **Lock-free reads**: SeqLock version check on internal nodes, immutable leaves (CoW).
+- **CoW writes**: Pre-built sub-tree, one spinlock + one pointer write per operation. Unified `SplitCoW` handles all levels.
+- **EBR**: `ReadGuard` announces readers; retired nodes stamped with fence timestamp; `DrainRetired` reclaims when safe.
+- **Leaf pool**: 64 pooled 4KB leaves, placement-new reuse — eliminates `_aligned_malloc` per insert.
+- **Leaf chain range scan**: `MemTableSource` lazy iterates — no full memtable copy for active memtable.
+- **Blob values**: `> page/2` stored as external blobs. Blob cleanup in destructor (MSVC codegen limitation).
+- **MVCC**: `Find()` returns leftmost match; new versions inserted left. `Lookup()` scans for visible timestamp.
+
+### Concurrency
+- **SnapshotTracker**: lock-free 256-slot CAS array with random probe, mutex fallback + `fallback_used_` flag.
+- **memtable_mutex_**: `shared_mutex` — readers briefly copy pointers, tree traversal fully outside lock. Writer lock fires only on freeze+swap (~once per 16MB).
+- **sstable_metadata_mutex_**: `shared_mutex` — concurrent readers share; compaction swap takes exclusive briefly.
+- **EBR drain**: engine-driven `DrainRetired(MinActiveTS())` after each Insert, progressive under read load.
+- **Writer**: single-threaded. Internal node version spinlock (`TryLock`/`UnlockAndBump`) — one CAS per write.
+- **Readers**: zero locks, zero CAS. SeqLock version validation + immutable leaves. ReadGuard for EBR safety.
 
 ### SSTable v5
 - **Format**: `[Header:24B][Blocks][FilterArea][Footer]`
@@ -63,7 +75,7 @@
 - **Lookup**: `Lookup(key)` → check KV Cache → snapshot `read_ts` → check MemTable (active + frozen) → SSTables (bloom+range filter, newest-first, L0 then L1+ binary search, BlockReader cache-aware).
 - **Tombstone in LookupKey**: when `fl&1` (tombstone), returns `true` with empty value so the engine stops searching older SSTables and returns false.
 - **Recovery**: MANIFEST → rebuild SSTable catalog → WAL from last checkpoint → replay → flush → checkpoint. Manifest recovery populates `manifest_seq` and loads bloom/range metadata from files.
-- **Concurrency**: Reader-writer lock (`shared_mutex`) on memtable. Single writer thread. MVCC snapshot reads.
+- **Concurrency**: Lock-free B+-tree for reads/web_single writer thread. `memtable_mutex_` only gates freeze+swap. `sstable_metadata_mutex_` uses `shared_mutex` — concurrent reader metadata copies. MVCC snapshot reads via `SnapshotTracker::Acquire/Release`. EBR drain via `MinActiveTS()` fence check.
 - **Backpressure**: Write queue byte-capped (16MB). Timestamps: `global_ts_` monotonic counter, key cap 1KB, KV cap 4MB.
 - **MemTable Recycling**: After flush, memtable kept in `frozen_memtables_` with a `fence_ts`. `DrainRecyclePending()` checks `SnapshotTracker::MinActiveTS() >= fence_ts` — when all active readers see the SSTable, the memtable is unlinked and released.
 
@@ -101,85 +113,19 @@
 - Byte-capped write queue (16MB) with CV-based backpressure.
 
 ### Tests
-- 9 test suites: `test_memtable`, `test_sstable`, `test_engine`, `test_wal`, `test_manifest`, `test_server`, `test_wfw`, `test_small`, `test_restart`.
+- 9 test suites: `test_memtable` (196 assertions), `test_sstable` (3197 assertions), `test_engine`, `test_wal`, `test_manifest`, `test_server`, `test_wfw`, `test_small`, `test_restart`.
 - Separate fuzz test (`test_fuzz`, `-DKVDB_BUILD_FUZZ=ON`): 32 threads, fault injection, persistence verification.
-- All suites pass.
-
-## Build Commands
-```powershell
-cmake -B build -S .
-cmake --build build
-cd build && ctest --output-on-failure
-```
-
-## Project Structure
-```
-keyvaluedb/
-├── CMakeLists.txt
-├── .work_state           (AI agent crash-resume state)
-├── include/kvdb/
-│   ├── block_cache.hpp   (SSTableCache — LRU block/metadata cache)
-│   ├── block_reader.hpp  (BlockReader — pure virtual cache interface)
-│   ├── bloom.hpp         (BloomFilter)
-│   ├── bptree.hpp        (BPlusTree — contiguous-page)
-│   ├── client.hpp        (TCP client)
-│   ├── config.hpp        (constants)
-│   ├── engine.hpp        (LSMTreeEngine)
-│   ├── iterator.hpp      (RangeIterator + SourceIterators, cache-aware)
-│   ├── kv_cache.hpp      (KVCache — LRU key-value cache)
-│   ├── manifest.hpp      (SSTable catalog)
-│   ├── memtable.hpp      (MemTable)
-│   ├── protocol.hpp      (wire protocol + socket helpers)
-│   ├── server.hpp        (TCP server + write queue)
-│   ├── snappy.hpp        (Snappy compression)
-│   ├── snp_tracker.hpp   (Snapshot tracker)
-│   ├── sstable.hpp       (SSTable v5, BlockReader-aware)
-│   ├── types.hpp         (KeyValuePair, RangeBound)
-│   ├── wal.hpp           (WAL with checkpointing)
-│   └── internal/crc32.hpp  (CRC-32/ISO-HDLC)
-├── src/
-│   ├── client.cpp
-│   ├── engine.cpp
-│   ├── manifest.cpp
-│   ├── memtable.cpp
-│   ├── protocol.cpp
-│   ├── server.cpp
-│   ├── sstable.cpp
-│   └── wal.cpp
-├── tests/
-│   ├── test_common.hpp
-│   ├── test_engine.cpp
-│   ├── test_frz.cpp
-│   ├── test_fuzz.cpp
-│   ├── test_manifest.cpp
-│   ├── test_memtable.cpp
-│   ├── test_min.cpp
-│   ├── test_restart.cpp
-│   ├── test_server.cpp
-│   ├── test_small.cpp
-│   ├── test_sstable.cpp
-│   ├── test_wal.cpp
-│   └── test_wfw.cpp
-└── docs/
-    ├── api.md
-    └── design.md
-```
+- All suites pass (9/9, 100%).
 
 ## Pending Steps (DO NOT start unless user explicitly asks)
 | Step | Feature | Status |
 |------|---------|--------|
-| 8  | Batch Write — dual queues, gap-based timestamps, sequential batches | **Done** |
+| — | High-concurrency lock-free B+-tree (SeqLock reads, CoW writes, unified SplitCoW, EBR, leaf pool) | **Done** |
+| — | Timestamp-based progressive EBR drain via engine SnapshotTracker | **Done** |
+| — | Lock-free SnapshotTracker (256 CAS slots, fallback_used_ flag) | **Done** |
+| — | Narrowed memtable_mutex_ to freeze+swap only | **Done** |
+| — | sstable_metadata_mutex_ upgraded to shared_mutex | **Done** |
+| — | Lazy leaf-walk range scan (no full memtable copy) | **Done** |
+| — | Batch Write — dual queues, gap-based timestamps, sequential batches | **Done** |
 | — | Compare-And-Swap — non-blocking, same-key serial skip, async read | **Done** |
-| 9  | Cache sharding — 16-partition mutex like LevelDB | **Done** |
-
-### Batch Write (Step 8, in progress)
-- **Dual write queues**: normal (`write_queue_`, strict priority) + batch (`batch_queue_`, secondary). Batch can wait forever.
-- **Async writes**: `BatchPut`/`BatchDelete` respond OK immediately on enqueue. Only block on queue-full backpressure.
-- **Mini-batch bulk load**: writer drains up to `Config::kDefaultMiniBatchSize` (1000) entries at once. Triggers: (1) queue reaches mini_batch_size, (2) queue half-full, (3) batch commit pending. Mini-batches are atomic — normal writes wait during mini-batch processing.
-- **Timestamp**: assigned at `StartBatch()` — `batch_ts = global_ts + gap` (Config::kDefaultBatchIncrementGap = 1M). All writes share one ts. MVCC isolation: readers skip (read_ts < batch_ts) until `CommitBatch()` jumps `global_ts` past `batch_ts + 1`.
-- **Commit**: HandleClient blocks until writer drains all remaining batch entries + calls `engine_.CommitBatch()`. Synchronized via `batch_commit_pending_` + `batch_commit_done_cv_`.
-- **Abort (untouched)**: if no mini-batch drained, clear batch_queue_ instantly — zero pollution.
-- **Abort (touched)**: WAL abort record written. `batch_touched_` flag on engine. Remaining queue entries discarded. `batch_ts` added to `aborted_batch_ts_` on all memtables + SSTable metadata. All read paths skip entries with aborted timestamps, falling through to the next older committed version.
-- **Deletion mark lifetime**: memtable → SSTable (flushed in CRC-COVERED REGION) → propagated through compaction levels. Dropped at bottom level when all aborted entries have been compacted out.
-- **Recovery**: WAL::BufferAbort writes `[CRC][0xFFFFFFFE][batch_ts:8B]`. Recover returns aborted timestamps. RecoverFromWAL applies to active memtable + existing SSTable metadata.
-- **Sequential**: only one batch active at a time (`batch_in_progress_` via `batch_mutex_`).
+| — | Cache sharding — 16-partition mutex like LevelDB | **Done** |
