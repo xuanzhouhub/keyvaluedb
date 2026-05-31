@@ -61,7 +61,7 @@ static void SyncWorkerLoop(kvdb::EngineSyncState* s) {
         bool force = false;
         if (timed_out) {
             auto now = std::chrono::steady_clock::now();
-            if (now - last_forced > std::chrono::milliseconds(100)) {
+            if (now - last_forced > std::chrono::milliseconds(Config::kWALIdleSyncMs)) {
                 force = true;
                 last_forced = now;
             }
