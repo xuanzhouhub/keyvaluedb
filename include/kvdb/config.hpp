@@ -42,6 +42,7 @@ struct Config {
 
     static constexpr uint32_t kWALCheckpointSentinel = 0xFFFFFFFF;
 
+    static constexpr size_t kWALMinSyncBytes     = 4 * 1024 * 1024;
     static constexpr size_t kDefaultKVCacheShards     = 16;
     static constexpr size_t kDefaultBlockCacheShards  = 16;
     static constexpr size_t kDefaultKVMaxEntries      = 10000;

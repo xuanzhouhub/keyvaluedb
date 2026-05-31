@@ -134,10 +134,15 @@ void WAL::WriteCheckpoint(uint64_t timestamp, uint64_t batch_ts) {
     batch_seq_++;
 }
 
-size_t WAL::Sync() {
+size_t WAL::Sync(bool force) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (write_buf_.empty()) {
         return synced_seq_;
+    }
+    if (!force && write_buf_.size() < Config::kWALMinSyncBytes) {
+        size_t current = batch_seq_;
+        synced_seq_ = current;
+        return current;
     }
 
     std::vector<char> to_sync;

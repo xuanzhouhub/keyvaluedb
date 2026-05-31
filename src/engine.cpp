@@ -56,7 +56,7 @@ static void SyncWorkerLoop(kvdb::EngineSyncState* s) {
             });
         }
 
-        size_t synced = s->wal->Sync();
+        size_t synced = s->wal->Sync(false);
 
         {
             std::lock_guard<std::mutex> lock(s->mtx);
@@ -66,7 +66,7 @@ static void SyncWorkerLoop(kvdb::EngineSyncState* s) {
         s->cv.notify_all();
     }
 
-    size_t synced = s->wal->Sync();
+    size_t synced = s->wal->Sync(true);
     {
         std::lock_guard<std::mutex> lock(s->mtx);
         s->synced_seq = synced;
@@ -249,7 +249,7 @@ LSMTreeEngine::~LSMTreeEngine() {
     }
 
     try {
-        wal_->Sync();
+        wal_->Sync(true);
         {
             std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
             while (!frozen_memtables_.empty()) {
@@ -265,7 +265,7 @@ LSMTreeEngine::~LSMTreeEngine() {
             active_memtable_.reset();
             DoFlush(frozen);
             wal_->WriteCheckpoint(global_ts_.load(), batch_in_progress_ ? batch_ts_ : 0);
-            wal_->Sync();
+        wal_->Sync(true);
         }
         DrainFileGC();
     } catch (...) {}
@@ -868,7 +868,7 @@ bool LSMTreeEngine::AbortBatch() {
 
     if (batch_touched_) {
         wal_->BufferAbort(batch_ts_);
-        wal_->Sync();
+        wal_->Sync(true);
 
         {
             std::unique_lock<std::shared_mutex> mlock(memtable_mutex_);
