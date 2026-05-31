@@ -48,15 +48,28 @@ struct kvdb::CompactionState {
 };
 
 static void SyncWorkerLoop(kvdb::EngineSyncState* s) {
+    auto last_forced = std::chrono::steady_clock::now();
     while (!s->should_stop.load()) {
+        bool timed_out = false;
         {
             std::unique_lock<std::mutex> lock(s->mtx);
-            s->ready_cv.wait_for(lock, std::chrono::microseconds(200), [s] {
+            timed_out = !s->ready_cv.wait_for(lock, std::chrono::microseconds(200), [s] {
                 return s->should_stop.load() || s->requested_seq > s->synced_seq;
             });
         }
 
-        size_t synced = s->wal->Sync(false);
+        bool force = false;
+        if (timed_out) {
+            auto now = std::chrono::steady_clock::now();
+            if (now - last_forced > std::chrono::milliseconds(100)) {
+                force = true;
+                last_forced = now;
+            }
+        } else {
+            last_forced = std::chrono::steady_clock::now();
+        }
+
+        size_t synced = s->wal->Sync(force);
 
         {
             std::lock_guard<std::mutex> lock(s->mtx);
