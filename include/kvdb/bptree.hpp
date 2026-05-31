@@ -235,8 +235,7 @@ private:
     static void Free(void* p);
 
     void RetireLeaf(LeafPage* leaf) {
-        auto it = std::find(leaf_nodes_.begin(), leaf_nodes_.end(), leaf);
-        if (it != leaf_nodes_.end()) leaf_nodes_.erase(it);
+        leaf_nodes_.erase(leaf);
         uint64_t f = fence_source_ ? fence_source_->load() : ++retire_seq_;
         pending_retired_.push_back({leaf, nullptr, false, f});
     }
@@ -388,7 +387,7 @@ private:
     size_t count_ = 0;
     size_t memory_usage_ = 0;
     std::vector<InternalNode*> internal_nodes_;
-    std::vector<LeafPage*> leaf_nodes_;
+    std::unordered_set<LeafPage*> leaf_nodes_;
     std::vector<LeafPage*> leaf_pool_;
     std::unordered_set<uint64_t> aborted_batch_ts_;
     std::unordered_set<void*> blob_ptrs_;
@@ -457,12 +456,12 @@ inline BPlusTree::LeafPage* BPlusTree::NewLeaf() {
     if (!leaf_pool_.empty()) {
         auto* n = leaf_pool_.back(); leaf_pool_.pop_back();
         new (static_cast<void*>(n)) LeafPage();
-        leaf_nodes_.push_back(n);
+        leaf_nodes_.insert(n);
         return n;
     }
     void* m = Alloc(kPageSize, 4096);
     auto* n = new (m) LeafPage();
-    leaf_nodes_.push_back(n);
+    leaf_nodes_.insert(n);
     return n;
 }
 inline BPlusTree::InternalNode* BPlusTree::NewInternal() {
