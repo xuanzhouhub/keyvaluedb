@@ -601,6 +601,7 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
         RetireLeaf(leaf);
         if (!found) count_++;
         memory_usage_ += es;
+        if (!fence_source_) DrainRetired(UINT64_MAX);
         return;
     }
 
@@ -608,6 +609,7 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
              key, value, timestamp, large, is_tombstone, pos);
     if (!found) count_++;
     memory_usage_ += es;
+    if (!fence_source_) DrainRetired(UINT64_MAX);
 }
 inline bool BPlusTree::Lookup(const std::string& key, uint64_t read_ts, std::string& value_out) const {
     ReadGuard guard(this);
