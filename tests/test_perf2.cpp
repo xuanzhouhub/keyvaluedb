@@ -46,7 +46,12 @@ int main() {
 
     std::filesystem::remove_all("./pe3");
     kvdb::LSMTreeEngine engine("./pe3", 1024ULL*1024*1024);
-    bench("Engine Insert", 2000, [&](int i){ engine.Insert(k, v); });
+    {
+        auto t0 = now();
+        for (int i = 0; i < 5000; ++i) engine.Insert("e"+std::to_string(i), v);
+        auto t1 = now();
+        std::cout << "  Engine Insert: " << ns(t0,t1)/5000.0 << " ns\n" << std::flush;
+    }
     std::filesystem::remove_all("./pe3");
 
     std::cout << "\nDONE.\n";

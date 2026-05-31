@@ -31,6 +31,12 @@ void WriteUint32LE(std::vector<char>& buf, uint32_t v) {
     buf.push_back(static_cast<char>((v >> 16) & 0xFF));
     buf.push_back(static_cast<char>((v >> 24) & 0xFF));
 }
+static void WriteUint32LE_at(char* p, size_t off, uint32_t v) {
+    p[off + 0] = static_cast<char>(v & 0xFF);
+    p[off + 1] = static_cast<char>((v >> 8) & 0xFF);
+    p[off + 2] = static_cast<char>((v >> 16) & 0xFF);
+    p[off + 3] = static_cast<char>((v >> 24) & 0xFF);
+}
 
 void WriteSentinelRecord(uint32_t sentinel, uint64_t ts, std::vector<char>& buf_out) {
     CRC32 crc;
@@ -69,27 +75,25 @@ void WAL::SerializeRecord(std::vector<char>& buf,
                           const std::string& key,
                           const std::string& value,
                           uint64_t timestamp) {
-    std::vector<char> body;
-    WriteUint32LE(body, static_cast<uint32_t>(key.size()));
-    body.insert(body.end(), key.begin(), key.end());
-    WriteUint32LE(body, static_cast<uint32_t>(value.size()));
-    body.insert(body.end(), value.begin(), value.end());
+    size_t rec_sz = 4 + key.size() + 4 + value.size() + 8;
+    size_t base = buf.size();
+    buf.resize(base + 4 + rec_sz);
 
-    body.push_back(static_cast<char>(timestamp & 0xFF));
-    body.push_back(static_cast<char>((timestamp >> 8) & 0xFF));
-    body.push_back(static_cast<char>((timestamp >> 16) & 0xFF));
-    body.push_back(static_cast<char>((timestamp >> 24) & 0xFF));
-    body.push_back(static_cast<char>((timestamp >> 32) & 0xFF));
-    body.push_back(static_cast<char>((timestamp >> 40) & 0xFF));
-    body.push_back(static_cast<char>((timestamp >> 48) & 0xFF));
-    body.push_back(static_cast<char>((timestamp >> 56) & 0xFF));
+    char* body = buf.data() + base + 4;
+    WriteUint32LE_at(buf.data(), base, 0);  // placeholder CRC
+
+    WriteUint32LE_at(body, 0, static_cast<uint32_t>(key.size()));
+    std::memcpy(body + 4, key.data(), key.size());
+    size_t pos = 4 + key.size();
+    WriteUint32LE_at(body, pos, static_cast<uint32_t>(value.size())); pos += 4;
+    std::memcpy(body + pos, value.data(), value.size()); pos += value.size();
+    for (int i = 0; i < 8; ++i)
+        body[pos++] = static_cast<char>((timestamp >> (i * 8)) & 0xFF);
 
     CRC32 crc;
-    crc.Update(body.data(), body.size());
+    crc.Update(body, rec_sz);
     uint32_t checksum = crc.Finalize();
-
-    WriteUint32LE(buf, checksum);
-    buf.insert(buf.end(), body.begin(), body.end());
+    WriteUint32LE_at(buf.data(), base, checksum);
 }
 
 void WAL::Buffer(const std::string& key, const std::string& value, uint64_t timestamp) {
