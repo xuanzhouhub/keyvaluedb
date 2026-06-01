@@ -5,10 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <list>
 #include <mutex>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace kvdb {
@@ -29,33 +27,39 @@ public:
     void Clear();
 
 private:
+    struct Entry {
+        std::string value;
+        std::string key;
+        uint64_t timestamp;
+        Entry* prev = nullptr;
+        Entry* next = nullptr;
+    };
+
     struct Shard {
-        struct Entry {
-            std::string value;
-            std::string key;
-            uint64_t timestamp;
-            Entry* prev = nullptr;
-            Entry* next = nullptr;
-        };
+        struct Bucket { uint32_t hash = 0; uint32_t idx = kEmpty; };
+        static constexpr uint32_t kEmpty = ~0u;
 
         mutable std::mutex mutex;
-        std::unordered_map<std::string, Entry> map;
+        std::vector<Bucket> buckets;
+        std::vector<Entry> entries;
         Entry* lru_head = nullptr;
         Entry* lru_tail = nullptr;
+        size_t entry_count = 0;
         size_t max_entries;
         size_t max_bytes;
         size_t current_bytes = 0;
 
+        void Init(size_t per_e, size_t per_b);
+        uint32_t FindSlot(const std::string& key, uint32_t hash) const;
+        void Rehash();
+
         void LruRemove(Entry* e);
         void LruPushFront(Entry* e);
-        void Touch_nolock(Entry* e);
-        Entry* LruTail_nolock() const { return lru_tail; }
         void Evict_nolock();
 
         bool Get_nolock(const std::string& key, uint64_t read_ts, std::string& value_out);
         void Put_nolock(const std::string& key, const std::string& value, uint64_t ts);
         void Erase_nolock(const std::string& key);
-        void Clear_nolock();
     };
 
     size_t num_shards_;
@@ -71,12 +75,19 @@ private:
 
 inline KVCache::KVCache(size_t max_entries, size_t max_bytes, size_t num_shards)
     : num_shards_(num_shards), shards_(num_shards) {
-    size_t per_shard_entries = std::max(size_t(1), max_entries / num_shards);
-    size_t per_shard_bytes   = std::max(size_t(1), max_bytes / num_shards);
-    for (auto& s : shards_) {
-        s.max_entries = per_shard_entries;
-        s.max_bytes   = per_shard_bytes;
-    }
+    size_t per_e = std::max(size_t(1), max_entries / num_shards);
+    size_t per_b = std::max(size_t(1), max_bytes / num_shards);
+    for (auto& s : shards_) s.Init(per_e, per_b);
+}
+
+inline void KVCache::Shard::Init(size_t per_e, size_t per_b) {
+    max_entries = per_e;
+    max_bytes   = per_b;
+    size_t bc = 1;
+    while (bc < per_e * 2) bc *= 2;
+    buckets.resize(bc);
+    for (auto& b : buckets) b.idx = kEmpty;
+    entries.resize(per_e);
 }
 
 inline bool KVCache::Get(const std::string& key, uint64_t read_ts, std::string& value_out) {
@@ -102,7 +113,7 @@ inline size_t KVCache::Size() const {
     size_t total = 0;
     for (auto& s : shards_) {
         std::lock_guard<std::mutex> lock(s.mutex);
-        total += s.map.size();
+        total += s.entry_count;
     }
     return total;
 }
@@ -110,19 +121,20 @@ inline size_t KVCache::Size() const {
 inline void KVCache::Clear() {
     for (auto& s : shards_) {
         std::lock_guard<std::mutex> lock(s.mutex);
-        s.Clear_nolock();
+        s.entry_count = 0;
+        s.current_bytes = 0;
+        s.lru_head = s.lru_tail = nullptr;
+        for (auto& b : s.buckets) b.idx = Shard::kEmpty;
     }
 }
 
-// ── Intrusive LRU list operations ──
+// ─── LRU ───
 inline void KVCache::Shard::LruRemove(Entry* e) {
     if (e->prev) e->prev->next = e->next;
     else lru_head = e->next;
     if (e->next) e->next->prev = e->prev;
     else lru_tail = e->prev;
-    e->prev = e->next = nullptr;
 }
-
 inline void KVCache::Shard::LruPushFront(Entry* e) {
     e->prev = nullptr;
     e->next = lru_head;
@@ -131,66 +143,95 @@ inline void KVCache::Shard::LruPushFront(Entry* e) {
     lru_head = e;
 }
 
-inline void KVCache::Shard::Touch_nolock(Entry* e) {
-    LruRemove(e);
-    LruPushFront(e);
+// ─── Open-addressing hash table (power-of-2 buckets) ───
+inline uint32_t KVCache::Shard::FindSlot(const std::string& key, uint32_t hash) const {
+    uint32_t mask = static_cast<uint32_t>(buckets.size() - 1);
+    uint32_t i = hash & mask;
+    while (buckets[i].idx != kEmpty) {
+        if (buckets[i].hash == hash && entries[buckets[i].idx].key == key)
+            return i;
+        i = (i + 1) & mask;
+    }
+    return kEmpty;
+}
+inline void KVCache::Shard::Rehash() {
+    std::vector<Bucket> old = std::move(buckets);
+    size_t new_sz = std::max(old.size() * 2, size_t(8));
+    buckets.resize(new_sz);
+    for (auto& b : buckets) b.idx = kEmpty;
+    uint32_t mask = static_cast<uint32_t>(buckets.size() - 1);
+    for (auto& b : old) {
+        if (b.idx == kEmpty) continue;
+        uint32_t i = b.hash & mask;
+        while (buckets[i].idx != kEmpty) i = (i + 1) & mask;
+        buckets[i] = b;
+    }
 }
 
-inline bool KVCache::Shard::Get_nolock(const std::string& key, uint64_t read_ts,
-                                        std::string& value_out) {
-    auto it = map.find(key);
-    if (it == map.end()) return false;
-    if (it->second.timestamp > read_ts) return false;
-    value_out = it->second.value;
-    Touch_nolock(&it->second);
+inline bool KVCache::Shard::Get_nolock(const std::string& key, uint64_t read_ts, std::string& value_out) {
+    uint32_t hash = static_cast<uint32_t>(std::hash<std::string>{}(key));
+    uint32_t slot = FindSlot(key, hash);
+    if (slot == kEmpty) return false;
+    Entry& e = entries[buckets[slot].idx];
+    if (e.timestamp > read_ts) return false;
+    value_out = e.value;
+    LruRemove(&e);
+    LruPushFront(&e);
     return true;
 }
 
-inline void KVCache::Shard::Put_nolock(const std::string& key,
-                                        const std::string& value,
-                                        uint64_t ts) {
-    auto it = map.find(key);
-    if (it != map.end()) {
-        current_bytes -= it->second.value.size();
-        it->second.value = value;
-        it->second.timestamp = ts;
-        current_bytes += value.size();
-        Touch_nolock(&it->second);
-    } else {
-        while (map.size() >= max_entries
-               || current_bytes + value.size() > max_bytes)
-            Evict_nolock();
-        Entry e;
+inline void KVCache::Shard::Put_nolock(const std::string& key, const std::string& value, uint64_t ts) {
+    uint32_t hash = static_cast<uint32_t>(std::hash<std::string>{}(key));
+    uint32_t slot = FindSlot(key, hash);
+    if (slot != kEmpty) {
+        Entry& e = entries[buckets[slot].idx];
+        current_bytes -= e.value.size();
         e.value = value;
-        e.key = key;
         e.timestamp = ts;
-        auto [nit, _] = map.emplace(key, std::move(e));
-        LruPushFront(&nit->second);
         current_bytes += value.size();
+        LruRemove(&e);
+        LruPushFront(&e);
+        return;
     }
+    while (entry_count >= max_entries || current_bytes + value.size() > max_bytes)
+        Evict_nolock();
+    if (entry_count * 2 >= buckets.size()) Rehash();
+    hash = static_cast<uint32_t>(std::hash<std::string>{}(key));
+    uint32_t idx = static_cast<uint32_t>(entry_count++);
+    entries[idx].key = key;
+    entries[idx].value = value;
+    entries[idx].timestamp = ts;
+    entries[idx].prev = entries[idx].next = nullptr;
+
+    uint32_t mask = static_cast<uint32_t>(buckets.size() - 1);
+    uint32_t i = hash & mask;
+    while (buckets[i].idx != kEmpty) i = (i + 1) & mask;
+    buckets[i].hash = hash;
+    buckets[i].idx = idx;
+
+    LruPushFront(&entries[idx]);
+    current_bytes += value.size();
 }
 
 inline void KVCache::Shard::Erase_nolock(const std::string& key) {
-    auto it = map.find(key);
-    if (it != map.end()) {
-        current_bytes -= it->second.value.size();
-        LruRemove(&it->second);
-        map.erase(it);
-    }
-}
-
-inline void KVCache::Shard::Clear_nolock() {
-    map.clear();
-    lru_head = lru_tail = nullptr;
-    current_bytes = 0;
+    uint32_t hash = static_cast<uint32_t>(std::hash<std::string>{}(key));
+    uint32_t slot = FindSlot(key, hash);
+    if (slot == kEmpty) return;
+    Entry& e = entries[buckets[slot].idx];
+    current_bytes -= e.value.size();
+    LruRemove(&e);
+    buckets[slot].idx = kEmpty;
 }
 
 inline void KVCache::Shard::Evict_nolock() {
-    Entry* e = LruTail_nolock();
-    if (!e) return;
-    LruRemove(e);
-    current_bytes -= e->value.size();
-    map.erase(e->key);
+    if (!lru_tail) return;
+    uint32_t hash = static_cast<uint32_t>(std::hash<std::string>{}(lru_tail->key));
+    uint32_t slot = FindSlot(lru_tail->key, hash);
+    if (slot != kEmpty) {
+        current_bytes -= lru_tail->value.size();
+        buckets[slot].idx = kEmpty;
+    }
+    LruRemove(lru_tail);
 }
 
 } // namespace kvdb
