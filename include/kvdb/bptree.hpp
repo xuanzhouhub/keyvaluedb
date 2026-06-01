@@ -257,7 +257,7 @@ private:
 
     // Unified split: prepare entire sub-tree, replace pointer in parent
     void SplitCoW(LeafPage* leaf,
-                  std::vector<InternalNode*>& path, std::vector<uint32_t>& indices,
+                  InternalNode** path, uint32_t* indices, int depth,
                   const std::string& key, const std::string& value, uint64_t ts,
                   bool large, bool tomb, uint32_t pos) {
         // ---- PREPARE leaves (no locks) ----
@@ -296,9 +296,9 @@ private:
         uint32_t lock_idx = 0;
         bool placed = false;
 
-        for (int lv = static_cast<int>(path.size()) - 1; lv >= 0; --lv) {
-            InternalNode* cp = path[static_cast<size_t>(lv)];
-            uint32_t cidx = indices[static_cast<size_t>(lv)];
+        for (int lv = depth - 1; lv >= 0; --lv) {
+            InternalNode* cp = path[lv];
+            uint32_t cidx = indices[lv];
             InternalNode* nn = NewInternal();
             nn->s.CopyKeysFrom(cp->s);
             for (uint8_t i = 0; i < cp->s.children.size(); ++i) nn->s.PushChild(cp->s.Chld(i));
@@ -387,8 +387,7 @@ private:
     InternalNode* NewInternal();
     LeafPage* FindLeaf(const std::string& key) const;
     LeafPage* FindLeafForWrite(const std::string& key,
-                               std::vector<InternalNode*>& path,
-                               std::vector<uint32_t>& indices);
+                               InternalNode** path, uint32_t* indices, int& depth);
 
     InternalNode* root_ = nullptr;
     LeafPage* first_leaf_ = nullptr;
@@ -560,23 +559,24 @@ inline BPlusTree::LeafPage* BPlusTree::FindLeaf(const std::string& key) const {
     return nullptr;
 }
 inline BPlusTree::LeafPage* BPlusTree::FindLeafForWrite(
-    const std::string& key, std::vector<InternalNode*>& path, std::vector<uint32_t>& indices) {
+    const std::string& key, InternalNode** path, uint32_t* indices, int& depth) {
     InternalNode* node = root_;
+    depth = 0;
     while (node) {
         uint64_t v1 = ReadVersion(node->version);
         if (IsLocked(v1)) continue;
         uint32_t idx = node->FindChild(key);
-        path.push_back(node); indices.push_back(idx);
+        path[depth] = node; indices[depth] = idx; depth++;
         InternalNode* next = (idx < node->s.children.size()) ? node->s.children[idx] : nullptr;
         if (!next) {
             LeafPage* leaf = (idx < node->s.child_leaves.size()) ? node->s.child_leaves[idx] : nullptr;
             uint64_t v2 = ReadVersion(node->version);
             if (v1 == v2) return leaf;
-            path.pop_back(); indices.pop_back();
+            depth--;
             continue;
         }
         uint64_t v2 = ReadVersion(node->version);
-        if (v1 != v2) { path.pop_back(); indices.pop_back(); continue; }
+        if (v1 != v2) { depth--; continue; }
         node = next;
     }
     return nullptr;
@@ -585,8 +585,8 @@ inline BPlusTree::LeafPage* BPlusTree::FindLeafForWrite(
 inline void BPlusTree::Insert(const std::string& key, const std::string& value, uint64_t timestamp, bool is_tombstone) {
     using C=std::chrono::steady_clock;
     auto t0=C::now();
-    std::vector<InternalNode*> path;std::vector<uint32_t> indices;
-    LeafPage* leaf=FindLeafForWrite(key,path,indices);
+    InternalNode* path[16];uint32_t indices[16];int depth;
+    LeafPage* leaf=FindLeafForWrite(key,path,indices,depth);
     auto t1=C::now();s_find+=std::chrono::duration<double,std::nano>(t1-t0).count();t0=C::now();
     uint32_t pos;bool large=(value.size()>kPageSize/2);bool found=leaf->Find(key,pos);
     t1=C::now();s_leaffind+=std::chrono::duration<double,std::nano>(t1-t0).count();t0=C::now();
@@ -601,7 +601,7 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
         for(LeafPage* p=first_leaf_;p;p=p->next)if(p->next==leaf){p->next=nleaf;break;}
         if(first_leaf_==leaf)first_leaf_=nleaf;
         t1=C::now();s_chain+=std::chrono::duration<double,std::nano>(t1-t0).count();t0=C::now();
-        if(!path.empty()){while(!TryLock(path.back()->version)){}path.back()->s.child_leaves[indices.back()]=nleaf;UnlockAndBump(path.back()->version);}
+        if(depth>0){while(!TryLock(path[depth-1]->version)){}path[depth-1]->s.child_leaves[indices[depth-1]]=nleaf;UnlockAndBump(path[depth-1]->version);}
         else{auto*r=NewInternal();r->s.child_leaves.push_back(nleaf);root_=r;}
         t1=C::now();s_lock+=std::chrono::duration<double,std::nano>(t1-t0).count();t0=C::now();
         RetireLeaf(leaf);
@@ -610,15 +610,14 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
         t1=C::now();s_drain+=std::chrono::duration<double,std::nano>(t1-t0).count();s_n_non++;return;
     }
     auto ts=C::now();
-    SplitCoW(leaf,path,indices,key,value,timestamp,large,is_tombstone,pos);
+    SplitCoW(leaf,path,indices,depth,key,value,timestamp,large,is_tombstone,pos);
     if(!found)count_++;memory_usage_+=es;if(!fence_source_)DrainRetired(UINT64_MAX);
     s_split+=std::chrono::duration<double,std::nano>(C::now()-ts).count();s_n_spl++;
 }
 #else
 inline void BPlusTree::Insert(const std::string& key, const std::string& value, uint64_t timestamp, bool is_tombstone) {
-    std::vector<InternalNode*> path;
-    std::vector<uint32_t> indices;
-    LeafPage* leaf = FindLeafForWrite(key, path, indices);
+    InternalNode* path[16]; uint32_t indices[16]; int depth;
+    LeafPage* leaf = FindLeafForWrite(key, path, indices, depth);
     uint32_t pos;
     bool large = (value.size() > kPageSize / 2);
     bool found = leaf->Find(key, pos);
@@ -638,10 +637,10 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
             if (p->next == leaf) { p->next = nleaf; break; }
         if (first_leaf_ == leaf) first_leaf_ = nleaf;
 
-        if (!path.empty()) {
-            while (!TryLock(path.back()->version)) {}
-            path.back()->s.child_leaves[indices.back()] = nleaf;
-            UnlockAndBump(path.back()->version);
+        if (depth > 0) {
+            while (!TryLock(path[depth-1]->version)) {}
+            path[depth-1]->s.child_leaves[indices[depth-1]] = nleaf;
+            UnlockAndBump(path[depth-1]->version);
         }
         else {
             auto* nr = NewInternal(); nr->s.child_leaves.push_back(nleaf); root_ = nr;
@@ -653,7 +652,7 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
         return;
     }
 
-    SplitCoW(leaf, path, indices,
+    SplitCoW(leaf, path, indices, depth,
              key, value, timestamp, large, is_tombstone, pos);
     if (!found) count_++;
     memory_usage_ += es;
