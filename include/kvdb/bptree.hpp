@@ -113,6 +113,12 @@ struct InternalNode {
 
         uint8_t KeyCount() const { return key_count; }
         std::string KeyStr(uint8_t i) const { return std::string(key_data+key_offs[i], key_lens[i]); }
+        int CompareKey(uint8_t i, const std::string& k) const {
+            uint16_t len = key_lens[i]; uint16_t m = len < static_cast<uint16_t>(k.size()) ? len : static_cast<uint16_t>(k.size());
+            int c = std::memcmp(key_data+key_offs[i], k.data(), m);
+            if (c != 0) return c;
+            return len < k.size() ? -1 : (len > k.size() ? 1 : 0);
+        }
         const std::string& KeyRef(uint8_t i) const { static std::string tmp; tmp=KeyStr(i); return tmp; }
         void InsKey(uint8_t pos, const std::string& k) {
             for (uint8_t i=key_count; i>pos; --i){key_offs[i]=key_offs[i-1];key_lens[i]=key_lens[i-1];}
@@ -158,7 +164,7 @@ struct InternalNode {
 
         uint32_t FindChild(const std::string& key) const {
             uint32_t lo = 0, hi = s.KeyCount();
-            while (lo < hi) { uint32_t mid = (lo+hi)/2; if (key < s.KeyStr(static_cast<uint8_t>(mid))) hi=mid; else lo=mid+1; }
+            while (lo < hi) { uint32_t mid = (lo+hi)/2; if (s.CompareKey(static_cast<uint8_t>(mid),key) > 0) hi=mid; else lo=mid+1; }
             return lo;
         }
     };
