@@ -235,7 +235,6 @@ private:
     static void Free(void* p);
 
     void RetireLeaf(LeafPage* leaf) {
-        leaf_nodes_.erase(leaf);
         uint64_t f = fence_source_ ? fence_source_->load() : ++retire_seq_;
         pending_retired_.push_back({leaf, nullptr, false, f});
     }
@@ -387,7 +386,6 @@ private:
     size_t count_ = 0;
     size_t memory_usage_ = 0;
     std::vector<InternalNode*> internal_nodes_;
-    std::unordered_set<LeafPage*> leaf_nodes_;
     std::vector<LeafPage*> leaf_pool_;
     std::unordered_set<uint64_t> aborted_batch_ts_;
     std::unordered_set<void*> blob_ptrs_;
@@ -456,12 +454,10 @@ inline BPlusTree::LeafPage* BPlusTree::NewLeaf() {
     if (!leaf_pool_.empty()) {
         auto* n = leaf_pool_.back(); leaf_pool_.pop_back();
         new (static_cast<void*>(n)) LeafPage();
-        leaf_nodes_.insert(n);
         return n;
     }
     void* m = Alloc(kPageSize, 4096);
     auto* n = new (m) LeafPage();
-    leaf_nodes_.insert(n);
     return n;
 }
 inline BPlusTree::InternalNode* BPlusTree::NewInternal() {
@@ -480,9 +476,14 @@ inline BPlusTree::BPlusTree(std::atomic<uint64_t>* fence_source) {
 }
 inline BPlusTree::~BPlusTree() {
     DrainAllRetired();
-    for (auto* n : leaf_nodes_) {
-        n->~LeafPage(); Free(n);
+    // Phase 1: walk leaf chain, free leaves (no blob cleanup inside loop — MSVC bug)
+    for (LeafPage* leaf = first_leaf_; leaf; ) {
+        LeafPage* next = leaf->next;
+        leaf->~LeafPage(); Free(leaf);
+        leaf = next;
     }
+    // Phase 2: free pooled leaves + blob allocations + internal nodes
+    for (auto* l : leaf_pool_) Free(l);
     for (auto* p : blob_ptrs_) Free(p);
     for (auto* n : internal_nodes_) delete n;
 }
