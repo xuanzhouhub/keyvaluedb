@@ -384,15 +384,20 @@ private:
 
     static void CopyEntry(const LeafPage* src, uint32_t i, LeafPage* dst, uint32_t pos) {
         bool blob = (src->ValLen(i) == kLargeValFlag);
-        std::string k(src->Rec(i), src->KeyLen(i));
-        std::string v;
-        void* bp = nullptr;
-        if (blob) {
-            std::memcpy(&bp, src->Rec(i) + src->KeyLen(i), sizeof(void*));
-        } else {
-            v.assign(src->Rec(i) + src->KeyLen(i), src->ValLen(i));
-        }
-        dst->InsertEntry(pos, k, v, src->Timestamp(i), blob, src->IsTombstone(i), bp);
+        uint16_t klen = src->KeyLen(i);
+        uint16_t vlen = blob ? 8 : src->ValLen(i);
+        uint32_t rec_sz = klen + vlen;
+        if (dst->Free() < rec_sz + LeafPage::kSlotSize) return;
+        uint16_t rec_off = static_cast<uint16_t>(dst->data_start - rec_sz);
+        std::memcpy(dst->Raw() + rec_off, src->Rec(i), rec_sz);
+        if (pos < dst->count)
+            std::memmove(dst->Slot(pos + 1), dst->Slot(pos), (dst->count - pos) * LeafPage::kSlotSize);
+        uint16_t ev = src->IsTombstone(i) ? (blob ? (kLargeValFlag | 0x8000) : (vlen | 0x8000))
+                     : (blob ? kLargeValFlag : vlen);
+        dst->SetSlot(pos, rec_off, klen, ev, src->Timestamp(i));
+        dst->count++;
+        dst->data_start = rec_off;
+        dst->slot_end += static_cast<uint32_t>(LeafPage::kSlotSize);
     }
     LeafPage* NewLeaf();
     InternalNode* NewInternal();
