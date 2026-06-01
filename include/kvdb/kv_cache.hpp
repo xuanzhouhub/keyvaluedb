@@ -32,6 +32,7 @@ private:
     struct Shard {
         struct Entry {
             std::string value;
+            std::string key;
             uint64_t timestamp;
             Entry* prev = nullptr;
             Entry* next = nullptr;
@@ -161,6 +162,7 @@ inline void KVCache::Shard::Put_nolock(const std::string& key,
             Evict_nolock();
         Entry e;
         e.value = value;
+        e.key = key;
         e.timestamp = ts;
         auto [nit, _] = map.emplace(key, std::move(e));
         LruPushFront(&nit->second);
@@ -187,13 +189,8 @@ inline void KVCache::Shard::Evict_nolock() {
     Entry* e = LruTail_nolock();
     if (!e) return;
     LruRemove(e);
-    for (auto it = map.begin(); it != map.end(); ++it) {
-        if (&it->second == e) {
-            current_bytes -= e->value.size();
-            map.erase(it);
-            return;
-        }
-    }
+    current_bytes -= e->value.size();
+    map.erase(e->key);
 }
 
 } // namespace kvdb
