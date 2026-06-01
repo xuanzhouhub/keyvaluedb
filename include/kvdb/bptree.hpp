@@ -270,10 +270,15 @@ private:
         LeafPage* left = NewLeaf();
         LeafPage* right = NewLeaf();
         uint32_t mid = leaf->count / 2;
-        for (uint32_t i = 0; i < mid; ++i)
-            CopyEntry(leaf, i, left, left->count);
+
+        CopyLeafContent(left, leaf);
+        left->count = mid;
+        left->slot_end = LeafPage::kSlotBase + mid * LeafPage::kSlotSize;
+        left->data_start = (mid > 0) ? left->Offset(mid - 1) : kPageSize;
+
         for (uint32_t i = mid; i < leaf->count; ++i)
             CopyEntry(leaf, i, right, right->count);
+
         if (pos < mid)
             left->InsertEntry(pos, key, value, ts, large, tomb)
                 || right->InsertEntry(right->count, key, value, ts, large, tomb);
