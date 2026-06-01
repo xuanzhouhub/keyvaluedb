@@ -13,6 +13,11 @@
 #include <unordered_set>
 #include <vector>
 
+#ifdef KVDB_PROFILE_TREE
+#include <chrono>
+#include <iostream>
+#endif
+
 namespace kvdb {
 
 class BPlusTree {
@@ -181,6 +186,10 @@ struct InternalNode {
     void Export(std::vector<KeyValuePair>& out) const;
     size_t Size() const { return count_; }
     size_t MemoryUsage() const { return memory_usage_; }
+#ifdef KVDB_PROFILE_TREE
+    static void PrintProfile();
+    static void ResetProfile();
+#endif
 
     void AddAbortedBatch(uint64_t batch_ts) { aborted_batch_ts_.insert(batch_ts); }
     const std::unordered_set<uint64_t>& AbortedBatches() const { return aborted_batch_ts_; }
@@ -434,6 +443,12 @@ private:
         for (auto* l : leaf_pool_) Free(l);
         leaf_pool_.clear();
     }
+
+#ifdef KVDB_PROFILE_TREE
+    static double s_find, s_leaffind, s_newleaf, s_copy, s_insert;
+    static double s_chain, s_lock, s_retire, s_drain, s_split;
+    static uint64_t s_n_non, s_n_spl;
+#endif
 };
 
 inline void* BPlusTree::Alloc(size_t sz, size_t align) {
@@ -566,6 +581,40 @@ inline BPlusTree::LeafPage* BPlusTree::FindLeafForWrite(
     }
     return nullptr;
 }
+#ifdef KVDB_PROFILE_TREE
+inline void BPlusTree::Insert(const std::string& key, const std::string& value, uint64_t timestamp, bool is_tombstone) {
+    using C=std::chrono::steady_clock;
+    auto t0=C::now();
+    std::vector<InternalNode*> path;std::vector<uint32_t> indices;
+    LeafPage* leaf=FindLeafForWrite(key,path,indices);
+    auto t1=C::now();s_find+=std::chrono::duration<double,std::nano>(t1-t0).count();t0=C::now();
+    uint32_t pos;bool large=(value.size()>kPageSize/2);bool found=leaf->Find(key,pos);
+    t1=C::now();s_leaffind+=std::chrono::duration<double,std::nano>(t1-t0).count();t0=C::now();
+    size_t es=key.size()+value.size()+Config::kMemTableEntryOverheadBytes;
+    LeafPage* nleaf=NewLeaf();
+    t1=C::now();s_newleaf+=std::chrono::duration<double,std::nano>(t1-t0).count();t0=C::now();
+    CopyLeafContent(nleaf,leaf);
+    t1=C::now();s_copy+=std::chrono::duration<double,std::nano>(t1-t0).count();t0=C::now();
+    if(nleaf->InsertEntry(pos,key,value,timestamp,large,is_tombstone)){
+        t1=C::now();s_insert+=std::chrono::duration<double,std::nano>(t1-t0).count();t0=C::now();
+        if(large){void*bp;std::memcpy(&bp,nleaf->Rec(pos)+nleaf->KeyLen(pos),sizeof(void*));blob_ptrs_.insert(bp);}
+        for(LeafPage* p=first_leaf_;p;p=p->next)if(p->next==leaf){p->next=nleaf;break;}
+        if(first_leaf_==leaf)first_leaf_=nleaf;
+        t1=C::now();s_chain+=std::chrono::duration<double,std::nano>(t1-t0).count();t0=C::now();
+        if(!path.empty()){while(!TryLock(path.back()->version)){}path.back()->s.child_leaves[indices.back()]=nleaf;UnlockAndBump(path.back()->version);}
+        else{auto*r=NewInternal();r->s.child_leaves.push_back(nleaf);root_=r;}
+        t1=C::now();s_lock+=std::chrono::duration<double,std::nano>(t1-t0).count();t0=C::now();
+        RetireLeaf(leaf);
+        t1=C::now();s_retire+=std::chrono::duration<double,std::nano>(t1-t0).count();t0=C::now();
+        if(!found)count_++;memory_usage_+=es;if(!fence_source_)DrainRetired(UINT64_MAX);
+        t1=C::now();s_drain+=std::chrono::duration<double,std::nano>(t1-t0).count();s_n_non++;return;
+    }
+    auto ts=C::now();
+    SplitCoW(leaf,path,indices,key,value,timestamp,large,is_tombstone,pos);
+    if(!found)count_++;memory_usage_+=es;if(!fence_source_)DrainRetired(UINT64_MAX);
+    s_split+=std::chrono::duration<double,std::nano>(C::now()-ts).count();s_n_spl++;
+}
+#else
 inline void BPlusTree::Insert(const std::string& key, const std::string& value, uint64_t timestamp, bool is_tombstone) {
     std::vector<InternalNode*> path;
     std::vector<uint32_t> indices;
@@ -581,7 +630,6 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
         if (large) {
             void* bp;
             uint32_t tp = pos;
-            // Find the inserted entry's actual position (may differ due to Find)
             if (found) tp = pos;
             std::memcpy(&bp, nleaf->Rec(tp) + nleaf->KeyLen(tp), sizeof(void*));
             blob_ptrs_.insert(bp);
@@ -611,6 +659,7 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
     memory_usage_ += es;
     if (!fence_source_) DrainRetired(UINT64_MAX);
 }
+#endif
 inline bool BPlusTree::Lookup(const std::string& key, uint64_t read_ts, std::string& value_out) const {
     ReadGuard guard(this);
     for (;;) {
@@ -701,5 +750,28 @@ inline void BPlusTree::MemTableWalk::Load() {
     current_.timestamp = leaf_->Timestamp(pos_);
     current_.is_tombstone = leaf_->IsTombstone(pos_);
 }
+
+#ifdef KVDB_PROFILE_TREE
+double BPlusTree::s_find=0,BPlusTree::s_leaffind=0,BPlusTree::s_newleaf=0,BPlusTree::s_copy=0,BPlusTree::s_insert=0;
+double BPlusTree::s_chain=0,BPlusTree::s_lock=0,BPlusTree::s_retire=0,BPlusTree::s_drain=0,BPlusTree::s_split=0;
+uint64_t BPlusTree::s_n_non=0,BPlusTree::s_n_spl=0;
+void BPlusTree::PrintProfile(){
+    if(s_n_non>0){
+        std::cerr<<"\n=== Tree Insert Profile ("<<s_n_non<<" non+"<<s_n_spl<<" split)===\n";
+        std::cerr<<"  FindLeafForWrite: "<<s_find/s_n_non<<" ns\n";
+        std::cerr<<"  leaf->Find:       "<<s_leaffind/s_n_non<<" ns\n";
+        std::cerr<<"  NewLeaf:          "<<s_newleaf/s_n_non<<" ns\n";
+        std::cerr<<"  CopyLeafContent:  "<<s_copy/s_n_non<<" ns\n";
+        std::cerr<<"  InsertEntry:      "<<s_insert/s_n_non<<" ns\n";
+        std::cerr<<"  Chain update:     "<<s_chain/s_n_non<<" ns\n";
+        std::cerr<<"  Lock+swap:        "<<s_lock/s_n_non<<" ns\n";
+        std::cerr<<"  RetireLeaf+drain: "<<(s_retire+s_drain)/s_n_non<<" ns\n";
+        double t=s_find+s_leaffind+s_newleaf+s_copy+s_insert+s_chain+s_lock+s_retire+s_drain;
+        std::cerr<<"  Sum non-split:    "<<t/s_n_non<<" ns\n";
+    }
+    if(s_n_spl>0)std::cerr<<"  Split (full):     "<<s_split/s_n_spl<<" ns ("<<s_n_spl<<")\n";
+}
+void BPlusTree::ResetProfile(){s_find=s_leaffind=s_newleaf=s_copy=s_insert=s_chain=s_lock=s_retire=s_drain=s_split=0;s_n_non=s_n_spl=0;}
+#endif
 
 } // namespace kvdb
