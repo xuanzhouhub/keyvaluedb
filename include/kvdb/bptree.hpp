@@ -411,6 +411,7 @@ private:
     size_t memory_usage_ = 0;
     std::vector<InternalNode*> internal_nodes_;
     std::vector<LeafPage*> leaf_pool_;
+    std::unordered_set<LeafPage*> leaf_nodes_;
     std::unordered_set<uint64_t> aborted_batch_ts_;
     std::unordered_set<void*> blob_ptrs_;
     mutable std::atomic<int> active_readers_{0};
@@ -436,7 +437,7 @@ private:
             auto& r = pending_retired_[j];
             if (min_ts > r.fence_ts) {
                 if (r.is_internal) { if (r.internal) delete r.internal; }
-                else { r.leaf->~LeafPage(); leaf_pool_.push_back(r.leaf); }
+                else { leaf_nodes_.erase(r.leaf); r.leaf->~LeafPage(); leaf_pool_.push_back(r.leaf); }
             } else {
                 pending_retired_[keep++] = r;
             }
@@ -484,10 +485,12 @@ inline BPlusTree::LeafPage* BPlusTree::NewLeaf() {
     if (!leaf_pool_.empty()) {
         auto* n = leaf_pool_.back(); leaf_pool_.pop_back();
         new (static_cast<void*>(n)) LeafPage();
+        leaf_nodes_.insert(n);
         return n;
     }
     void* m = Alloc(kPageSize, 4096);
     auto* n = new (m) LeafPage();
+    leaf_nodes_.insert(n);
     return n;
 }
 inline BPlusTree::InternalNode* BPlusTree::NewInternal() {
@@ -507,16 +510,14 @@ inline BPlusTree::BPlusTree(std::atomic<uint64_t>* fence_source) {
 }
 inline BPlusTree::~BPlusTree() {
     DrainAllRetired();
-    // Phase 1: walk leaf chain, free leaves (no blob cleanup inside loop — MSVC bug)
-    for (LeafPage* leaf = first_leaf_; leaf; ) {
-        LeafPage* next = leaf->next;
-        leaf->~LeafPage(); Free(leaf);
-        leaf = next;
+    for (auto* n : leaf_nodes_) {
+        for (uint32_t i = 0; i < n->count; ++i)
+            if (n->ValLen(i) == kLargeValFlag) {
+                void* blob; std::memcpy(&blob, n->Rec(i) + n->KeyLen(i), sizeof(void*));
+                Free(blob);
+            }
+        n->~LeafPage(); Free(n);
     }
-    // Phase 2: free pooled leaves + blob allocations + internal nodes
-    for (auto* l : leaf_pool_) Free(l);
-    for (auto* p : blob_ptrs_) Free(p);
-    for (auto* n : internal_nodes_) delete n;
 }
 
 inline bool BPlusTree::LeafPage::InsertEntry(
