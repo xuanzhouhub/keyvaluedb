@@ -366,6 +366,10 @@ private:
                 if (old_root) RetireNode(old_root);
             }
         } else {
+            for (LeafPage* p = first_leaf_; p; p = p->next)
+                if (p->next == leaf) { p->next = left; break; }
+            if (first_leaf_ == leaf) first_leaf_ = left;
+
             InternalNode* old_root = root_;
             InternalNode* nr = NewInternal();
             nr->s.PushKey(sep);
