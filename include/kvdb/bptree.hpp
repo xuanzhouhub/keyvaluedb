@@ -442,17 +442,31 @@ private:
     }
 
     void DrainRetiredWithFence(uint64_t min_ts) {
-        size_t keep = 0;
-        for (size_t j = 0; j < pending_retired_.size(); ++j) {
+        size_t n = pending_retired_.size();
+        PendingRetire keep_buf[64];
+        LeafPage* erase_buf[64];
+        LeafPage* pool_buf[64];
+        size_t keep_n = 0, erase_n = 0, pool_n = 0;
+
+        for (size_t j = 0; j < n; ++j) {
             auto& r = pending_retired_[j];
             if (min_ts > r.fence_ts) {
                 if (r.is_internal) { if (r.internal) delete r.internal; }
-                else { leaf_nodes_.erase(r.leaf); r.leaf->~LeafPage(); leaf_pool_[pool_count_++] = r.leaf; }
+                else {
+                    r.leaf->~LeafPage();
+                    erase_buf[erase_n++] = r.leaf;
+                    if (pool_n < Config::kLeafPoolSize) pool_buf[pool_n++] = r.leaf;
+                    else Free(r.leaf);
+                }
             } else {
-                pending_retired_[keep++] = r;
+                keep_buf[keep_n++] = r;
             }
         }
-        pending_retired_.resize(keep);
+
+        if (keep_n > 0) pending_retired_.assign(keep_buf, keep_buf + keep_n);
+        else pending_retired_.clear();
+        for (size_t i = 0; i < erase_n; ++i) leaf_nodes_.erase(erase_buf[i]);
+        for (size_t i = 0; i < pool_n; ++i) leaf_pool_[pool_count_++] = pool_buf[i];
         while (pool_count_ > Config::kLeafPoolSize)
             Free(leaf_pool_[--pool_count_]);
     }
@@ -667,7 +681,9 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
             UnlockAndBump(path[depth-1]->version);
         }
         else {
+            auto* old_root = root_;
             auto* nr = NewInternal(); nr->s.child_leaves.push_back(nleaf); root_ = nr;
+            if (old_root) RetireNode(old_root);
         }
         RetireLeaf(leaf);
         if (!found) count_++;
