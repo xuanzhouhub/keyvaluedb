@@ -497,6 +497,7 @@ inline BPlusTree::InternalNode* BPlusTree::NewInternal() {
 }
 inline BPlusTree::BPlusTree(std::atomic<uint64_t>* fence_source) {
     fence_source_ = fence_source;
+    active_readers_.store(0, std::memory_order_relaxed);
     LeafPage* l = NewLeaf();
     first_leaf_ = l;
     InternalNode* r = NewInternal();
