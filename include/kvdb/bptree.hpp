@@ -410,7 +410,8 @@ private:
     size_t count_ = 0;
     size_t memory_usage_ = 0;
     std::vector<InternalNode*> internal_nodes_;
-    std::vector<LeafPage*> leaf_pool_;
+    LeafPage* leaf_pool_[Config::kLeafPoolSize] = {};
+    size_t pool_count_ = 0;
     std::unordered_set<LeafPage*> leaf_nodes_;
     std::unordered_set<uint64_t> aborted_batch_ts_;
     std::unordered_set<void*> blob_ptrs_;
@@ -437,13 +438,14 @@ private:
             auto& r = pending_retired_[j];
             if (min_ts > r.fence_ts) {
                 if (r.is_internal) { if (r.internal) delete r.internal; }
-                else { leaf_nodes_.erase(r.leaf); r.leaf->~LeafPage(); leaf_pool_.push_back(r.leaf); }
+                else { leaf_nodes_.erase(r.leaf); r.leaf->~LeafPage(); leaf_pool_[pool_count_++] = r.leaf; }
             } else {
                 pending_retired_[keep++] = r;
             }
         }
         pending_retired_.resize(keep);
-        while (leaf_pool_.size() > 64) { auto* l = leaf_pool_.back(); leaf_pool_.pop_back(); Free(l); }
+        while (pool_count_ > Config::kLeafPoolSize)
+            Free(leaf_pool_[--pool_count_]);
     }
 
     void RetireNode(InternalNode* n) {
@@ -456,8 +458,8 @@ private:
     void DrainAllRetired() {
         while (active_readers_.load(std::memory_order_acquire) > 0) { /* spin */ }
         DrainRetiredWithFence(UINT64_MAX);
-        for (auto* l : leaf_pool_) Free(l);
-        leaf_pool_.clear();
+        for (size_t i = 0; i < pool_count_; ++i) Free(leaf_pool_[i]);
+        pool_count_ = 0;
     }
 
 #ifdef KVDB_PROFILE_TREE
@@ -482,10 +484,9 @@ inline void BPlusTree::Free(void* p) {
 #endif
 }
 inline BPlusTree::LeafPage* BPlusTree::NewLeaf() {
-    if (!leaf_pool_.empty()) {
-        auto* n = leaf_pool_.back(); leaf_pool_.pop_back();
+    if (pool_count_ > 0) {
+        auto* n = leaf_pool_[--pool_count_];
         new (static_cast<void*>(n)) LeafPage();
-        leaf_nodes_.insert(n);
         return n;
     }
     void* m = Alloc(kPageSize, 4096);
@@ -510,14 +511,10 @@ inline BPlusTree::BPlusTree(std::atomic<uint64_t>* fence_source) {
 }
 inline BPlusTree::~BPlusTree() {
     DrainAllRetired();
-    for (auto* n : leaf_nodes_) {
-        for (uint32_t i = 0; i < n->count; ++i)
-            if (n->ValLen(i) == kLargeValFlag) {
-                void* blob; std::memcpy(&blob, n->Rec(i) + n->KeyLen(i), sizeof(void*));
-                Free(blob);
-            }
-        n->~LeafPage(); Free(n);
-    }
+    for (auto* n : leaf_nodes_) { n->~LeafPage(); Free(n); }
+    for (size_t i = 0; i < pool_count_; ++i) Free(leaf_pool_[i]);
+    for (auto* p : blob_ptrs_) Free(p);
+    for (auto* n : internal_nodes_) delete n;
 }
 
 inline bool BPlusTree::LeafPage::InsertEntry(
