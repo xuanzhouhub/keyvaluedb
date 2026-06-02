@@ -274,7 +274,12 @@ private:
         CopyLeafContent(left, leaf);
         left->count = mid;
         left->slot_end = LeafPage::kSlotBase + mid * LeafPage::kSlotSize;
-        left->data_start = (mid > 0) ? left->Offset(mid - 1) : kPageSize;
+        uint32_t min_off = left->Offset(0);
+        for (uint32_t i = 1; i < mid; ++i) {
+            uint32_t off = left->Offset(i);
+            if (off < min_off) min_off = off;
+        }
+        left->data_start = min_off;
 
         for (uint32_t i = mid; i < leaf->count; ++i)
             CopyEntry(leaf, i, right, right->count);
