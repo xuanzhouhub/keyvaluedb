@@ -479,15 +479,19 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
     }
 
     if (!hit) {
-        std::unordered_set<uint64_t> scanned_ids;
+        uint64_t scanned_ids[4]; int scanned_n = 0;
         for (const auto& m : frozen_snapshot)
-            scanned_ids.insert(m->Id());
+            scanned_ids[scanned_n++] = m->Id();
+        auto is_scanned = [&](uint64_t id) {
+            for (int i = 0; i < scanned_n; ++i) if (scanned_ids[i] == id) return true;
+            return false;
+        };
 
         auto snap = SnapSSTableMetadata();
         if (snap) {
         for (auto it = snap->rbegin(); it != snap->rend() && !hit; ++it) {
             if (it->level != 0) continue;
-            if (scanned_ids.count(it->source_table_id)) continue;
+            if (is_scanned(it->source_table_id)) continue;
             if (!it->min_key.empty() && key < it->min_key) continue;
             if (!it->max_key.empty() && key > it->max_key) continue;
             if (it->bloom.BitCount() > 0 && !it->bloom.MightContain(key)) continue;
@@ -498,25 +502,15 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
         }
 
         if (!hit) {
-            std::map<int, std::vector<SSTable::Metadata>> levels;
             for (auto& meta : *snap) {
                 if (meta.level == 0) continue;
-                levels[meta.level].push_back(meta);
-            }
-            for (auto& [lvl, files] : levels) {
-                std::sort(files.begin(), files.end(),
-                          [](const SSTable::Metadata& a, const SSTable::Metadata& b)
-                          { return a.min_key < b.min_key; });
-                auto it = std::lower_bound(files.begin(), files.end(), key,
-                    [](const SSTable::Metadata& m, const std::string& k)
-                    { return m.max_key < k; });
-                if (it == files.end()) continue;
-                if (key < it->min_key || key > it->max_key) continue;
-                if (scanned_ids.count(it->source_table_id)) continue;
-                if (it->bloom.BitCount() > 0 && !it->bloom.MightContain(key)) continue;
+                if (is_scanned(meta.source_table_id)) continue;
+                if (!meta.min_key.empty() && key < meta.min_key) continue;
+                if (!meta.max_key.empty() && key > meta.max_key) continue;
+                if (meta.bloom.BitCount() > 0 && !meta.bloom.MightContain(key)) continue;
                 try {
-                    hit = SSTable::LookupKey(it->filepath, key, read_ts, found_val, sst_cache_.get(),
-                                         it->manifest_seq);
+                    hit = SSTable::LookupKey(meta.filepath, key, read_ts, found_val, sst_cache_.get(),
+                                             meta.manifest_seq);
                 } catch (const std::exception&) {}
                 if (hit) break;
             }
