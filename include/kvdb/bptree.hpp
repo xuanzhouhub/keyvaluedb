@@ -249,6 +249,22 @@ private:
     static void* Alloc(size_t sz, size_t align);
     static void Free(void* p);
 
+    static LeafPage* FindPredecessor(InternalNode** path, uint32_t* indices, int depth) {
+        for (int lv = depth - 1; lv >= 0; --lv) {
+            if (indices[lv] > 0) {
+                uint32_t pi = indices[lv] - 1;
+                if (path[lv]->s.children[pi]) {
+                    InternalNode* node = path[lv]->s.children[pi];
+                    while (node->s.children.size() > 0 && node->s.children[node->s.children.size()-1])
+                        node = node->s.children[node->s.children.size()-1];
+                    return node->s.child_leaves[node->s.child_leaves.size()-1];
+                }
+                return path[lv]->s.child_leaves[pi];
+            }
+        }
+        return nullptr;
+    }
+
     void RetireLeaf(LeafPage* leaf) {
         uint64_t f = fence_source_ ? fence_source_->load() : ++retire_seq_;
         pending_retired_.push_back({leaf, nullptr, false, f});
@@ -347,9 +363,9 @@ private:
 
         // ---- ONE LOCK: replace pointer in parent ----
         if (placed) {
-            for (LeafPage* p = first_leaf_; p; p = p->next)
-                if (p->next == leaf) { p->next = left; break; }
-            if (first_leaf_ == leaf) first_leaf_ = left;
+            LeafPage* pred = FindPredecessor(path, indices, depth);
+            if (pred) pred->next = left;
+            else first_leaf_ = left;
 
             if (lock_node) {
                 while (!TryLock(lock_node->version)) {}
@@ -363,9 +379,9 @@ private:
                 if (old_root) RetireNode(old_root);
             }
         } else {
-            for (LeafPage* p = first_leaf_; p; p = p->next)
-                if (p->next == leaf) { p->next = left; break; }
-            if (first_leaf_ == leaf) first_leaf_ = left;
+            LeafPage* pred = FindPredecessor(path, indices, depth);
+            if (pred) pred->next = left;
+            else first_leaf_ = left;
 
             InternalNode* old_root = root_;
             InternalNode* nr = NewInternal();
@@ -628,7 +644,7 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
     if(nleaf->InsertEntry(pos,key,value,timestamp,large,is_tombstone)){
         t1=C::now();s_insert+=std::chrono::duration<double,std::nano>(t1-t0).count();t0=C::now();
         if(large){void*bp;std::memcpy(&bp,nleaf->Rec(pos)+nleaf->KeyLen(pos),sizeof(void*));blob_ptrs_.insert(bp);}
-        for(LeafPage* p=first_leaf_;p;p=p->next)if(p->next==leaf){p->next=nleaf;break;}
+        LeafPage* pred=FindPredecessor(path,indices,depth);if(pred)pred->next=nleaf;else first_leaf_=nleaf;
         if(first_leaf_==leaf)first_leaf_=nleaf;
         t1=C::now();s_chain+=std::chrono::duration<double,std::nano>(t1-t0).count();t0=C::now();
         if(depth>0){while(!TryLock(path[depth-1]->version)){}path[depth-1]->s.child_leaves[indices[depth-1]]=nleaf;UnlockAndBump(path[depth-1]->version);}
@@ -663,9 +679,9 @@ inline void BPlusTree::Insert(const std::string& key, const std::string& value, 
             std::memcpy(&bp, nleaf->Rec(tp) + nleaf->KeyLen(tp), sizeof(void*));
             blob_ptrs_.insert(bp);
         }
-        for (LeafPage* p = first_leaf_; p; p = p->next)
-            if (p->next == leaf) { p->next = nleaf; break; }
-        if (first_leaf_ == leaf) first_leaf_ = nleaf;
+        LeafPage* pred = FindPredecessor(path, indices, depth);
+        if (pred) pred->next = nleaf;
+        else first_leaf_ = nleaf;
 
         if (depth > 0) {
             while (!TryLock(path[depth-1]->version)) {}

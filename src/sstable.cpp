@@ -288,6 +288,13 @@ SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
             meta.bloom = std::move(cached_bloom);
             meta.block_offsets = std::move(cached_offsets);
             meta.block_first_keys = std::move(cached_keys);
+            meta.min_key_len = UINT32_MAX; meta.max_key_len = 0;
+            for (auto& k : meta.block_first_keys) {
+                uint32_t l = static_cast<uint32_t>(k.size());
+                if (l < meta.min_key_len) meta.min_key_len = l;
+                if (l > meta.max_key_len) meta.max_key_len = l;
+            }
+            if (meta.min_key_len == UINT32_MAX) meta.min_key_len = 0;
             return meta;
         }
     }
@@ -312,8 +319,6 @@ SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
     meta.min_key_len=UINT32_MAX;meta.max_key_len=0;
     if(minkl>0){meta.min_key.resize(minkl);file.read(&meta.min_key[0],minkl);}
     if(maxkl>0){meta.max_key.resize(maxkl);file.read(&meta.max_key[0],maxkl);}
-    meta.min_key_len = static_cast<uint32_t>(meta.min_key.size());
-    meta.max_key_len = static_cast<uint32_t>(meta.max_key.size());
     uint32_t bb=ReadUint32LE(file),bh=ReadUint32LE(file),bz=ReadUint32LE(file);
     if(bz>0){std::vector<uint8_t> bd(bz);file.read(reinterpret_cast<char*>(bd.data()),bz);meta.bloom=BloomFilter::FromRaw(bd.data(),bb,bh);}
     uint32_t aborted_count = ReadUint32LE(file);
@@ -323,6 +328,13 @@ SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
     for(uint32_t i=0;i<bc;++i)meta.block_offsets[i]=ReadUint64LE(file);
     meta.block_first_keys.resize(bc);
     for(uint32_t i=0;i<bc;++i){uint16_t kl=static_cast<uint16_t>(ReadUint16LE(file));meta.block_first_keys[i].resize(kl);if(kl>0)file.read(&meta.block_first_keys[i][0],kl);}
+    meta.min_key_len=UINT32_MAX; meta.max_key_len=0;
+    for (auto& k : meta.block_first_keys) {
+        uint32_t l = static_cast<uint32_t>(k.size());
+        if (l < meta.min_key_len) meta.min_key_len = l;
+        if (l > meta.max_key_len) meta.max_key_len = l;
+    }
+    if (meta.min_key_len == UINT32_MAX) meta.min_key_len = 0;
     if (version >= 6) {
         uint32_t expected_crc = ReadUint32LE(file);
         uint64_t meta_end = static_cast<uint64_t>(file.tellg()) - 4;
