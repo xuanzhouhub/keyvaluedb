@@ -133,14 +133,10 @@ void LSMTreeEngine::CompactionWorkerLoop() {
         }
         if (compaction_->should_stop.load()) break;
 
-        std::vector<SSTable::Metadata> snapshot;
-        {
-            std::shared_lock<std::shared_mutex> lock(sstable_metadata_mutex_);
-            snapshot = sstable_metadata_;
-        }
-
+        auto snap = SnapSSTableMetadata();
+        if (!snap) continue;
         std::vector<size_t> counts(Config::kMaxLevel + 1, 0);
-        for (auto& m : snapshot) {
+        for (auto& m : *snap) {
             int lvl = m.level;
             if (lvl >= 0 && lvl <= static_cast<int>(Config::kMaxLevel))
                 counts[static_cast<size_t>(lvl)]++;
@@ -186,15 +182,10 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
     for (size_t i = 0; i < recovered_meta.size(); ++i)
         std::cerr << "  [" << i << "] " << recovered_meta[i].filepath
                   << " entries=" << recovered_meta[i].entry_count << std::endl;
-    {
-        std::lock_guard<std::shared_mutex> lock(sstable_metadata_mutex_);
-        sstable_metadata_ = std::move(recovered_meta);
-    }
-    sstable_seq_ = sstable_metadata_.size();
+    sstable_seq_ = recovered_meta.size();
 
-    {
-        std::lock_guard<std::shared_mutex> lock(sstable_metadata_mutex_);
-        for (auto& meta : sstable_metadata_) {
+    auto recovered_ptr = std::make_shared<std::vector<SSTable::Metadata>>(std::move(recovered_meta));
+    for (auto& meta : *recovered_ptr) {
             if (meta.min_key.empty() || meta.max_key.empty()) {
                 try {
                     auto full = SSTable::ReadMetadata(meta.filepath, sst_cache_.get(),
@@ -208,7 +199,7 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
                 } catch (...) {}
             }
         }
-    }
+        std::atomic_store(&sstable_metadata_, recovered_ptr);
 
     std::string wal_path = data_dir_ + "/wal.log";
     wal_ = std::make_unique<WAL>(wal_path);
@@ -294,11 +285,9 @@ void LSMTreeEngine::RecoverFromWAL() {
 
     for (uint64_t ts : aborted_batches) {
         active_memtable_->AddAbortedBatch(ts);
-        {
-            std::lock_guard<std::shared_mutex> lock(sstable_metadata_mutex_);
-            for (auto& meta : sstable_metadata_)
-                meta.aborted_batch_ts.insert(ts);
-        }
+        UpdateSSTableMetadata([ts](std::vector<SSTable::Metadata>& v) {
+            for (auto& meta : v) meta.aborted_batch_ts.insert(ts);
+        });
     }
 
     if (recovered.empty()) {
@@ -494,13 +483,9 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
         for (const auto& m : frozen_snapshot)
             scanned_ids.insert(m->Id());
 
-        std::vector<SSTable::Metadata> metadata;
-        {
-            std::shared_lock<std::shared_mutex> lock(sstable_metadata_mutex_);
-            metadata = sstable_metadata_;
-        }
-
-        for (auto it = metadata.rbegin(); it != metadata.rend() && !hit; ++it) {
+        auto snap = SnapSSTableMetadata();
+        if (snap) {
+        for (auto it = snap->rbegin(); it != snap->rend() && !hit; ++it) {
             if (it->level != 0) continue;
             if (scanned_ids.count(it->source_table_id)) continue;
             if (!it->min_key.empty() && key < it->min_key) continue;
@@ -514,7 +499,7 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
 
         if (!hit) {
             std::map<int, std::vector<SSTable::Metadata>> levels;
-            for (auto& meta : metadata) {
+            for (auto& meta : *snap) {
                 if (meta.level == 0) continue;
                 levels[meta.level].push_back(meta);
             }
@@ -535,6 +520,7 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
                 } catch (const std::exception&) {}
                 if (hit) break;
             }
+        }
         }
     }
 
@@ -595,13 +581,13 @@ void LSMTreeEngine::WaitForPendingFlushes() {
 }
 
 size_t LSMTreeEngine::SSTableCount() const {
-    std::shared_lock<std::shared_mutex> lock(sstable_metadata_mutex_);
-    return sstable_metadata_.size();
+    auto snap = SnapSSTableMetadata();
+    return snap ? snap->size() : 0;
 }
 
 std::vector<SSTable::Metadata> LSMTreeEngine::GetSSTableMetadata() const {
-    std::shared_lock<std::shared_mutex> lock(sstable_metadata_mutex_);
-    return sstable_metadata_;
+    auto snap = SnapSSTableMetadata();
+    return snap ? *snap : std::vector<SSTable::Metadata>{};
 }
 
 bool LSMTreeEngine::HasWALData() const {
@@ -648,9 +634,10 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
     }
 
     {
-        std::shared_lock<std::shared_mutex> lock(sstable_metadata_mutex_);
-        std::map<int, std::vector<SSTable::Metadata>> groups;
-        for (const auto& meta : sstable_metadata_) {
+        auto snap = SnapSSTableMetadata();
+        if (snap) {
+            std::map<int, std::vector<SSTable::Metadata>> groups;
+            for (const auto& meta : *snap) {
             if (!upper.IsUnbounded() && !meta.min_key.empty() && meta.min_key > upper.key) continue;
             if (!lower.IsUnbounded() && !meta.max_key.empty() && meta.max_key < lower.key) continue;
             if (meta.level == 0) {
@@ -674,6 +661,7 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
                     if (li->Valid()) sources.push_back(std::move(li));
                 }
             } catch (...) {}
+        }
         }
     }
 
@@ -724,10 +712,7 @@ void LSMTreeEngine::DoFlush(std::shared_ptr<MemTable> frozen_memtable) {
     meta.filepath = filepath;
     meta.manifest_seq = seq;
 
-    {
-        std::lock_guard<std::shared_mutex> lock(sstable_metadata_mutex_);
-        sstable_metadata_.push_back(meta);
-    }
+    UpdateSSTableMetadata([&](std::vector<SSTable::Metadata>& v) { v.push_back(meta); });
 
     manifest_->AddSSTable(seq, meta);
 }
@@ -795,17 +780,14 @@ void LSMTreeEngine::DrainFileGC() {
 }
 
 void LSMTreeEngine::CompactLevel(int from_level, int top_level) {
-    std::vector<SSTable::Metadata> snapshot;
-    {
-        std::shared_lock<std::shared_mutex> lock(sstable_metadata_mutex_);
-        snapshot = sstable_metadata_;
-    }
+    auto snap = SnapSSTableMetadata();
+    if (!snap) return;
 
     int to_level = top_level + 1;
     if (to_level > static_cast<int>(Config::kMaxLevel)) return;
 
     std::vector<SSTable::Metadata> inputs;
-    for (auto& m : snapshot) {
+    for (auto& m : *snap) {
         if (m.level >= from_level && m.level <= top_level)
             inputs.push_back(m);
     }
@@ -822,16 +804,14 @@ void LSMTreeEngine::CompactLevel(int from_level, int top_level) {
                      max_sst, is_last, "", "", outputs, garbage, *sst_cache_,
                      global_ts_.load());
 
-    {
-        std::lock_guard<std::shared_mutex> lock(sstable_metadata_mutex_);
-        auto& all = sstable_metadata_;
+    UpdateSSTableMetadata([&](std::vector<SSTable::Metadata>& v) {
         for (auto& in : inputs) {
-            all.erase(std::remove_if(all.begin(), all.end(),
+            v.erase(std::remove_if(v.begin(), v.end(),
                 [&](const SSTable::Metadata& m) { return m.filepath == in.filepath; }),
-                all.end());
+                v.end());
         }
-        for (auto& out : outputs) all.push_back(out);
-    }
+        for (auto& out : outputs) v.push_back(out);
+    });
 
     for (auto& in : inputs)
         manifest_->RemoveSSTable(sstable_seq_.load());
@@ -890,11 +870,9 @@ bool LSMTreeEngine::AbortBatch() {
                 m->AddAbortedBatch(batch_ts_);
         }
 
-        {
-            std::lock_guard<std::shared_mutex> lock(sstable_metadata_mutex_);
-            for (auto& meta : sstable_metadata_)
-                meta.aborted_batch_ts.insert(batch_ts_);
-        }
+        UpdateSSTableMetadata([this](std::vector<SSTable::Metadata>& v) {
+            for (auto& meta : v) meta.aborted_batch_ts.insert(batch_ts_);
+        });
     }
 
     batch_in_progress_ = false;

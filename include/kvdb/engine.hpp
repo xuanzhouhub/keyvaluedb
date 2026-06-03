@@ -83,6 +83,19 @@ private:
     void DeferFileGC(const std::string& filepath, uint64_t seq,
                      uint64_t fence_ts);
     void DrainFileGC();
+
+    std::shared_ptr<const std::vector<SSTable::Metadata>> SnapSSTableMetadata() const {
+        return std::atomic_load(&sstable_metadata_);
+    }
+    template<typename F>
+    void UpdateSSTableMetadata(F&& fn) {
+        std::lock_guard<std::mutex> lock(update_sstable_metadata_mutex_);
+        auto old = std::atomic_load(&sstable_metadata_);
+        auto new_vec = std::make_shared<std::vector<SSTable::Metadata>>(
+            old ? *old : std::vector<SSTable::Metadata>{});
+        fn(*new_vec);
+        std::atomic_store(&sstable_metadata_, new_vec);
+    }
     void FlushWorkerLoop();
     void CompactionWorkerLoop();
     void CompactLevel(int from_level, int top_level);
@@ -107,8 +120,8 @@ private:
     mutable std::shared_mutex memtable_mutex_;
 
     std::atomic<uint64_t> next_table_id_{0};
-    std::vector<SSTable::Metadata> sstable_metadata_;
-    mutable std::shared_mutex sstable_metadata_mutex_;
+    std::shared_ptr<std::vector<SSTable::Metadata>> sstable_metadata_;
+    mutable std::mutex update_sstable_metadata_mutex_;
 
     std::atomic<uint64_t> sstable_seq_{0};
     std::atomic<uint64_t> global_ts_{0};
