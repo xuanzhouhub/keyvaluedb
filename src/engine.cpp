@@ -479,8 +479,6 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
     }
 
     if (!hit) {
-        auto snap = SnapSSTableMetadata();
-        if (snap) {
         uint64_t scanned_ids[4]; int scanned_n = 0;
         for (const auto& m : frozen_snapshot)
             scanned_ids[scanned_n++] = m->Id();
@@ -488,6 +486,8 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
             for (int i = 0; i < scanned_n; ++i) if (scanned_ids[i] == id) return true;
             return false;
         };
+
+        auto snap = SnapSSTableMetadata();
 
         for (auto it = snap->rbegin(); it != snap->rend() && !hit; ++it) {
             if (it->level != 0) continue;
@@ -514,7 +514,6 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
                 } catch (const std::exception&) {}
                 if (hit) break;
             }
-        }
         }
     }
 
