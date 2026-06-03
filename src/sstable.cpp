@@ -276,31 +276,44 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
 SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
                                         BlockReader* cache,
                                         uint64_t manifest_seq) {
+    Metadata meta; meta.filepath=filepath;
+
+    // Try cache first: if bloom and offsets are cached, skip all I/O
+    if (cache && manifest_seq != 0) {
+        BloomFilter cached_bloom;
+        std::vector<uint64_t> cached_offsets;
+        std::vector<std::string> cached_keys;
+        if (cache->GetBloom(manifest_seq, cached_bloom) &&
+            cache->GetBlockOffsets(manifest_seq, cached_offsets, cached_keys)) {
+            meta.bloom = std::move(cached_bloom);
+            meta.block_offsets = std::move(cached_offsets);
+            meta.block_first_keys = std::move(cached_keys);
+            return meta;
+        }
+    }
+
     std::ifstream file(filepath,std::ios::binary);
     if(!file.is_open())throw std::runtime_error("SSTable open: "+filepath);
-    Metadata meta; meta.filepath=filepath;
     if(ReadUint32LE(file)!=Config::kSSTableMagic)throw std::runtime_error("Bad magic: "+filepath);
     if(ReadUint32LE(file)!=Config::kSSTableVersion)throw std::runtime_error("Bad version: "+filepath);
     ReadUint32LE(file); meta.entry_count=ReadUint32LE(file);
     file.seekg(4,std::ios::cur);
     uint16_t minkl=static_cast<uint16_t>(ReadUint16LE(file)),maxkl=static_cast<uint16_t>(ReadUint16LE(file));
     uint32_t version = Config::kSSTableVersion;
-    meta.min_key_len=UINT32_MAX;meta.max_key_len=0; uint32_t seen=0;
-    while(seen<meta.entry_count){
-        uint32_t crc=ReadUint32LE(file);file.seekg(1,std::ios::cur);
-        uint32_t csz=ReadUint32LE(file);
-        std::vector<char> cbuf(csz);file.read(cbuf.data(),static_cast<std::streamsize>(csz));
-        CRC32 c;c.Update(cbuf.data(),cbuf.size());if(c.Finalize()!=crc)throw std::runtime_error("CRC mismatch: "+filepath);
-        DecompressBlock(cbuf);
-        std::istringstream bs(std::string(cbuf.begin(),cbuf.end()));
-        auto r32=[&](){uint32_t v=0;v|=uint8_t(bs.get());v|=uint8_t(bs.get())<<8;v|=uint8_t(bs.get())<<16;v|=uint8_t(bs.get())<<24;return v;};
-        uint32_t n=r32();
-        for(uint32_t i=0;i<n;++i){uint32_t kl=r32();bs.seekg(kl,std::ios::cur);uint32_t vl=r32();bs.seekg(vl,std::ios::cur);for(int b=0;b<8;++b)bs.get();bs.get();if(kl<meta.min_key_len)meta.min_key_len=kl;if(kl>meta.max_key_len)meta.max_key_len=kl;}
-        seen+=n;
-    }
-    uint64_t meta_start = static_cast<uint64_t>(file.tellg());
+
+    // Jump to filter_off via footer trailer
+    file.seekg(-12,std::ios::end);
+    uint64_t filter_off = ReadUint64LE(file);
+    uint32_t footer_magic = ReadUint32LE(file);
+    if(footer_magic != Config::kSSTableFooterMagic) throw std::runtime_error("Bad footer magic: "+filepath);
+    file.seekg(static_cast<std::streamoff>(filter_off));
+
+    uint64_t meta_start = filter_off;
+    meta.min_key_len=UINT32_MAX;meta.max_key_len=0;
     if(minkl>0){meta.min_key.resize(minkl);file.read(&meta.min_key[0],minkl);}
     if(maxkl>0){meta.max_key.resize(maxkl);file.read(&meta.max_key[0],maxkl);}
+    meta.min_key_len = static_cast<uint32_t>(meta.min_key.size());
+    meta.max_key_len = static_cast<uint32_t>(meta.max_key.size());
     uint32_t bb=ReadUint32LE(file),bh=ReadUint32LE(file),bz=ReadUint32LE(file);
     if(bz>0){std::vector<uint8_t> bd(bz);file.read(reinterpret_cast<char*>(bd.data()),bz);meta.bloom=BloomFilter::FromRaw(bd.data(),bb,bh);}
     uint32_t aborted_count = ReadUint32LE(file);
