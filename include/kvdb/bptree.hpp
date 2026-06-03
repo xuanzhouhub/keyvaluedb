@@ -715,7 +715,8 @@ inline bool BPlusTree::Lookup(const std::string& key, uint64_t read_ts, std::str
         uint32_t idx;
         if (!leaf->Find(key, idx)) return false;
         for (uint32_t i = idx; i < leaf->count; ++i) {
-            if (std::string(leaf->Rec(i), leaf->KeyLen(i)) != key) break;
+            uint16_t klen = leaf->KeyLen(i);
+            if (klen != static_cast<uint16_t>(key.size()) || std::memcmp(leaf->Rec(i), key.data(), klen) != 0) break;
             if (aborted_batch_ts_.count(leaf->Timestamp(i))) continue;
             if (leaf->Timestamp(i) <= read_ts) {
                 if (leaf->IsTombstone(i)) return false;
