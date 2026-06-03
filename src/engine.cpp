@@ -497,10 +497,9 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
         std::vector<SSTable::Metadata> metadata;
         {
             std::shared_lock<std::shared_mutex> lock(sstable_metadata_mutex_);
-            if (!sstable_metadata_.empty()) metadata = sstable_metadata_;
+            metadata = sstable_metadata_;
         }
 
-        if (!metadata.empty()) {
         for (auto it = metadata.rbegin(); it != metadata.rend() && !hit; ++it) {
             if (it->level != 0) continue;
             if (scanned_ids.count(it->source_table_id)) continue;
@@ -536,7 +535,6 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
                 } catch (const std::exception&) {}
                 if (hit) break;
             }
-        }
         }
     }
 
