@@ -479,6 +479,8 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
     }
 
     if (!hit) {
+        auto snap = SnapSSTableMetadata();
+        if (snap) {
         uint64_t scanned_ids[4]; int scanned_n = 0;
         for (const auto& m : frozen_snapshot)
             scanned_ids[scanned_n++] = m->Id();
@@ -487,8 +489,6 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
             return false;
         };
 
-        auto snap = SnapSSTableMetadata();
-        if (snap) {
         for (auto it = snap->rbegin(); it != snap->rend() && !hit; ++it) {
             if (it->level != 0) continue;
             if (is_scanned(it->source_table_id)) continue;
@@ -629,7 +629,7 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
 
     {
         auto snap = SnapSSTableMetadata();
-        if (snap) {
+        if (snap && !snap->empty()) {
             std::map<int, std::vector<SSTable::Metadata>> groups;
             for (const auto& meta : *snap) {
             if (!upper.IsUnbounded() && !meta.min_key.empty() && meta.min_key > upper.key) continue;
