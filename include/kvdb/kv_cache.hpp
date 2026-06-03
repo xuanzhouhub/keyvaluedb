@@ -195,13 +195,15 @@ inline void KVCache::Shard::Put_nolock(const std::string& key, const std::string
     }
     uint32_t idx = kEmpty;
     while (entry_count >= max_entries || current_bytes + value.size() > max_bytes) {
+        if (idx != kEmpty) break;
         uint32_t evicted = Evict_nolock();
-        if (evicted == kEmpty) { if (idx == kEmpty) return; break; }
+        if (evicted == kEmpty) return;
         idx = evicted;
         entry_count--;
     }
     if (entry_count * 2 >= buckets.size()) Rehash();
     if (idx == kEmpty) idx = static_cast<uint32_t>(entry_count++);
+    else entry_count++;
     hash = static_cast<uint32_t>(std::hash<std::string>{}(key));
     entries[idx].key = key;
     entries[idx].value = value;
