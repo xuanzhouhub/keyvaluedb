@@ -11,10 +11,10 @@
 #include <cstring>
 #include <string>
 #include <unordered_set>
+#include <chrono>
 #include <vector>
 
 #ifdef KVDB_PROFILE_TREE
-#include <chrono>
 #include <iostream>
 #endif
 
