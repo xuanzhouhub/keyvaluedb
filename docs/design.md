@@ -175,13 +175,21 @@ Stores manifest_seq per SSTable for cache-key consistency.
 ### BlockReader Interface
 ```
 class BlockReader (block_reader.hpp) — pure virtual:
-  GetBloom(seq, bloom_out) -> bool
-  PutBloom(seq, bloom)
-  GetBlockOffsets(seq, offsets_out, first_keys_out) -> bool
-  PutBlockOffsets(seq, offsets, first_keys)
-  GetBlock(seq, block_idx, data_out, entry_count_out) -> bool
-  PutBlock(seq, block_idx, data, entry_count)
+  GetHeavy(seq) -> shared_ptr<const CachedHeavy>  // bloom + offsets + first_key_buf
+  PutHeavy(seq, bloom, offsets, first_key_buf)
+  GetBlock(seq, block_idx) -> shared_ptr<const string>
+  PutBlock(seq, block_idx, data)
   Invalidate(seq)
+```
+
+### SSTableCache (FlatCache-based)
+```
+SSTableCache (block_cache.hpp) uses kvdb::internal::FlatCache:
+  - FlatCache<K,V>: flat entry array, open-addressing hash table,
+    intrusive doubly-linked LRU, per-shard mutex.
+  - No per-node heap allocations (replaces std::unordered_map + std::list).
+  - Stores shared_ptr<const V>, returns shared_ptr on Get (no data copies).
+  - Tombstone-safe open addressing with cycle guard.
 ```
 
 ### SSTableCache
