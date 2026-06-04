@@ -212,7 +212,8 @@ void SSTable::WriteFromWalk(const std::string& filepath, BPlusTree::MemTableWalk
     }
     flushBest();
     if (builder.Count() > 0) {
-        BlockData bd; builder.FreezeBlock(bd.data, bloom, &bd.uncompressed); blocks.push_back(std::move(bd));
+        BlockData bd; bd.first_key = block_first_key;
+        builder.FreezeBlock(bd.data, bloom, &bd.uncompressed); blocks.push_back(std::move(bd));
     }
 
     std::fstream file(filepath, std::ios::binary | std::ios::trunc | std::ios::in | std::ios::out);
@@ -279,78 +280,94 @@ SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
     Metadata meta; meta.filepath=filepath;
 
     // Try cache first: if bloom and offsets are cached, skip all I/O
-    if (cache && manifest_seq != 0) {
-        BloomFilter cached_bloom;
-        std::vector<uint64_t> cached_offsets;
-        std::vector<std::string> cached_keys;
-        if (cache->GetBloom(manifest_seq, cached_bloom) &&
-            cache->GetBlockOffsets(manifest_seq, cached_offsets, cached_keys)) {
-            meta.bloom = std::move(cached_bloom);
-            meta.block_offsets = std::move(cached_offsets);
-            meta.block_first_keys = std::move(cached_keys);
+    if (cache) {
+        auto heavy = cache->GetHeavy(manifest_seq);
+        if (heavy) {
+            meta.bloom = heavy->bloom;
+            meta.block_offsets = heavy->block_offsets;
+            meta.block_first_key_buf = heavy->block_first_key_buf;
             meta.min_key_len = UINT32_MAX; meta.max_key_len = 0;
-            for (auto& k : meta.block_first_keys) {
-                uint32_t l = static_cast<uint32_t>(k.size());
-                if (l < meta.min_key_len) meta.min_key_len = l;
-                if (l > meta.max_key_len) meta.max_key_len = l;
+            const char* p = meta.block_first_key_buf.data();
+            const char* end = p + meta.block_first_key_buf.size();
+            while (p < end) {
+                uint16_t kl = static_cast<uint16_t>(static_cast<uint8_t>(p[0]) | (static_cast<uint8_t>(p[1]) << 8));
+                p += 2;
+                if (kl < meta.min_key_len) meta.min_key_len = kl;
+                if (kl > meta.max_key_len) meta.max_key_len = kl;
+                p += kl;
             }
             if (meta.min_key_len == UINT32_MAX) meta.min_key_len = 0;
             return meta;
         }
     }
 
-    std::ifstream file(filepath,std::ios::binary);
+    std::ifstream file(filepath,std::ios::binary|std::ios::ate);
     if(!file.is_open())throw std::runtime_error("SSTable open: "+filepath);
-    if(ReadUint32LE(file)!=Config::kSSTableMagic)throw std::runtime_error("Bad magic: "+filepath);
-    if(ReadUint32LE(file)!=Config::kSSTableVersion)throw std::runtime_error("Bad version: "+filepath);
-    ReadUint32LE(file); meta.entry_count=ReadUint32LE(file);
-    file.seekg(4,std::ios::cur);
-    uint16_t minkl=static_cast<uint16_t>(ReadUint16LE(file)),maxkl=static_cast<uint16_t>(ReadUint16LE(file));
-    uint32_t version = Config::kSSTableVersion;
+    uint64_t file_size = static_cast<uint64_t>(file.tellg());
+    if (file_size < 24 + 12) throw std::runtime_error("SSTable too small: "+filepath);
 
-    // Jump to filter_off via footer trailer
-    file.seekg(-12,std::ios::end);
-    uint64_t filter_off = ReadUint64LE(file);
-    uint32_t footer_magic = ReadUint32LE(file);
-    if(footer_magic != Config::kSSTableFooterMagic) throw std::runtime_error("Bad footer magic: "+filepath);
+    file.seekg(0);
+    char hdr[24];
+    file.read(hdr, 24);
+    auto r32=[&](const char* p){return uint8_t(p[0])|(uint8_t(p[1])<<8)|(uint8_t(p[2])<<16)|(uint8_t(p[3])<<24);};
+    if(r32(hdr)!=Config::kSSTableMagic)throw std::runtime_error("Bad magic: "+filepath);
+    if(r32(hdr+4)!=Config::kSSTableVersion)throw std::runtime_error("Bad version: "+filepath);
+    meta.entry_count = r32(hdr+12);
+    uint16_t minkl = static_cast<uint16_t>(uint8_t(hdr[20])|(uint8_t(hdr[21])<<8));
+    uint16_t maxkl = static_cast<uint16_t>(uint8_t(hdr[22])|(uint8_t(hdr[23])<<8));
+    if (r32(hdr+4) < 6) throw std::runtime_error("Unsupported SSTable version: "+filepath);
+
+    file.seekg(static_cast<std::streamoff>(file_size - 12));
+    char ftr[12];
+    file.read(ftr, 12);
+    uint64_t filter_off = uint64_t(r32(ftr))|(uint64_t(r32(ftr+4))<<32);
+    if(r32(ftr+8) != Config::kSSTableFooterMagic) throw std::runtime_error("Bad footer magic: "+filepath);
+
+    size_t filter_size = static_cast<size_t>(file_size - filter_off - 12);
     file.seekg(static_cast<std::streamoff>(filter_off));
+    std::vector<char> buf(filter_size);
+    file.read(buf.data(), static_cast<std::streamsize>(filter_size));
+    file.close();
 
-    uint64_t meta_start = filter_off;
-    meta.min_key_len=UINT32_MAX;meta.max_key_len=0;
-    if(minkl>0){meta.min_key.resize(minkl);file.read(&meta.min_key[0],minkl);}
-    if(maxkl>0){meta.max_key.resize(maxkl);file.read(&meta.max_key[0],maxkl);}
-    uint32_t bb=ReadUint32LE(file),bh=ReadUint32LE(file),bz=ReadUint32LE(file);
-    if(bz>0){std::vector<uint8_t> bd(bz);file.read(reinterpret_cast<char*>(bd.data()),bz);meta.bloom=BloomFilter::FromRaw(bd.data(),bb,bh);}
-    uint32_t aborted_count = ReadUint32LE(file);
-    for (uint32_t i = 0; i < aborted_count; ++i)
-        meta.aborted_batch_ts.insert(ReadUint64LE(file));
-    uint32_t bc=ReadUint32LE(file); meta.block_offsets.resize(bc);
-    for(uint32_t i=0;i<bc;++i)meta.block_offsets[i]=ReadUint64LE(file);
-    meta.block_first_keys.resize(bc);
-    for(uint32_t i=0;i<bc;++i){uint16_t kl=static_cast<uint16_t>(ReadUint16LE(file));meta.block_first_keys[i].resize(kl);if(kl>0)file.read(&meta.block_first_keys[i][0],kl);}
-    meta.min_key_len=UINT32_MAX; meta.max_key_len=0;
-    for (auto& k : meta.block_first_keys) {
-        uint32_t l = static_cast<uint32_t>(k.size());
-        if (l < meta.min_key_len) meta.min_key_len = l;
-        if (l > meta.max_key_len) meta.max_key_len = l;
+    meta.file_size = file_size;
+    const char* p = buf.data();
+    const char* end = p + filter_size;
+
+    if (minkl > 0) { meta.min_key.assign(p, minkl); p += minkl; }
+    if (maxkl > 0) { meta.max_key.assign(p, maxkl); p += maxkl; }
+    uint32_t bb = r32(p); p+=4; uint32_t bh = r32(p); p+=4; uint32_t bz = r32(p); p+=4;
+    if (bz > 0) { meta.bloom = BloomFilter::FromRaw(reinterpret_cast<const uint8_t*>(p), bb, bh); p += bz; }
+    uint32_t aborted_count = r32(p); p+=4;
+    for (uint32_t i = 0; i < aborted_count; ++i) {
+        meta.aborted_batch_ts.insert(uint64_t(r32(p))|(uint64_t(r32(p+4))<<32)); p += 8;
     }
+    uint32_t bc = r32(p); p+=4;
+    meta.block_offsets.resize(bc);
+    for (uint32_t i = 0; i < bc; ++i) {
+        meta.block_offsets[i] = uint64_t(r32(p))|(uint64_t(r32(p+4))<<32); p += 8;
+    }
+    const char* fk_start = p;
+    meta.min_key_len = UINT32_MAX; meta.max_key_len = 0;
+    for (uint32_t i = 0; i < bc; ++i) {
+        uint16_t kl = static_cast<uint16_t>(uint8_t(p[0])|(uint8_t(p[1])<<8)); p += 2;
+        if (kl < meta.min_key_len) meta.min_key_len = kl;
+        if (kl > meta.max_key_len) meta.max_key_len = kl;
+        p += kl;
+    }
+    meta.block_first_key_buf.assign(fk_start, p);
     if (meta.min_key_len == UINT32_MAX) meta.min_key_len = 0;
-    if (version >= 6) {
-        uint32_t expected_crc = ReadUint32LE(file);
-        uint64_t meta_end = static_cast<uint64_t>(file.tellg()) - 4;
-        uint64_t meta_size = meta_end - meta_start;
-        file.seekg(static_cast<std::streamoff>(meta_start));
-        std::vector<char> meta_buf(static_cast<size_t>(meta_size));
-        file.read(meta_buf.data(), static_cast<std::streamsize>(meta_size));
+
+    // MetaCRC: last 4 bytes of filter area are CRC over everything before it
+    if (filter_size >= 4) {
+        uint32_t expected_crc = r32(end - 4);
         CRC32 c;
-        c.Update(meta_buf.data(), meta_buf.size());
+        c.Update(buf.data(), filter_size - 4);
         if (c.Finalize() != expected_crc)
             throw std::runtime_error("MetaCRC mismatch: " + filepath);
     }
-    file.seekg(0,std::ios::end);meta.file_size=static_cast<uint64_t>(file.tellg());
-    if (cache && manifest_seq != 0) {
-        cache->PutBloom(manifest_seq, meta.bloom);
-        cache->PutBlockOffsets(manifest_seq, meta.block_offsets, meta.block_first_keys);
+
+    if (cache) {
+        cache->PutHeavy(manifest_seq, meta.bloom, meta.block_offsets, meta.block_first_key_buf);
     }
     return meta;
 }
@@ -379,8 +396,31 @@ std::vector<KeyValuePair> SSTable::ReadAll(const std::string& filepath) {
 bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
                          uint64_t read_ts, std::string& value_out,
                          BlockReader* cache, uint64_t manifest_seq) {
-    auto meta=ReadMetadata(filepath, cache);
-    if(meta.block_first_keys.empty())return false;
+    // Try cache first: no ReadMetadata → no data copies
+    std::shared_ptr<const CachedHeavy> heavy;
+    const BloomFilter* bloom = nullptr;
+    const std::vector<uint64_t>* offsets = nullptr;
+    const std::string* first_key_buf = nullptr;
+    const std::unordered_set<uint64_t>* aborted = nullptr;
+    SSTable::Metadata meta_fallback;  // only used if cache miss
+
+    if (cache) {
+        heavy = cache->GetHeavy(manifest_seq);
+    }
+    if (heavy) {
+        bloom = &heavy->bloom;
+        offsets = &heavy->block_offsets;
+        first_key_buf = &heavy->block_first_key_buf;
+    } else {
+        meta_fallback = ReadMetadata(filepath, cache, manifest_seq);
+        bloom = &meta_fallback.bloom;
+        offsets = &meta_fallback.block_offsets;
+        first_key_buf = &meta_fallback.block_first_key_buf;
+        aborted = &meta_fallback.aborted_batch_ts;
+    }
+
+    if (first_key_buf->empty()) return false;
+    if (bloom->BitCount() > 0 && !bloom->MightContain(key)) return false;
 
     auto scanBlock = [&](const char* d, size_t sz) -> bool {
         Block blk(d, sz);
@@ -388,7 +428,7 @@ bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
         for (uint32_t i = 0; i < blk.Count(); ++i) {
             blk.Seek(i);
             if (!blk.Read(kv)) break;
-            if (meta.aborted_batch_ts.count(kv.timestamp)) continue;
+            if (aborted && aborted->count(kv.timestamp)) continue;
             if (kv.key == key && kv.timestamp <= read_ts) {
                 if (kv.is_tombstone) { value_out.clear(); return true; }
                 value_out = std::move(kv.value);
@@ -398,24 +438,36 @@ bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
         return false;
     };
 
-    uint32_t target=0;
-    for(uint32_t i=0;i<meta.block_first_keys.size();++i){if(key<meta.block_first_keys[i])break;target=i;}
+    uint32_t target = 0;
+    {
+        const char* fp = first_key_buf->data();
+        const char* fe = fp + first_key_buf->size();
+        while (fp < fe) {
+            uint16_t kl = static_cast<uint16_t>(static_cast<uint8_t>(fp[0]) | (static_cast<uint8_t>(fp[1]) << 8));
+            fp += 2;
+            if (key.compare(0, std::string::npos, fp, kl) < 0) break;
+            target++;
+            fp += kl;
+        }
+    }
     auto search=[&](uint32_t idx)->bool{
-        if(idx>=meta.block_offsets.size())return false;
+        if(idx >= offsets->size())return false;
         if (cache) {
             auto block = cache->GetBlock(manifest_seq, idx);
             if (block) return scanBlock(block->data(), block->size());
         }
         std::ifstream f(filepath,std::ios::binary);
-        f.seekg(static_cast<std::streamoff>(meta.block_offsets[idx]));
+        f.seekg(static_cast<std::streamoff>((*offsets)[idx]));
         ReadUint32LE(f);f.seekg(1,std::ios::cur);
         uint32_t csz=ReadUint32LE(f);
         std::vector<char> cbuf(csz);f.read(cbuf.data(),static_cast<std::streamsize>(csz));DecompressBlock(cbuf);
-        return scanBlock(cbuf.data(), cbuf.size());
+        bool r = scanBlock(cbuf.data(), cbuf.size());
+        if (cache) cache->PutBlock(manifest_seq, idx, std::string(cbuf.data(), cbuf.size()));
+        return r;
     };
     if(search(target))return true;
     if(target>0&&search(target-1))return true;
-    if(target+1<meta.block_offsets.size()&&search(target+1))return true;
+    if(target+1<offsets->size()&&search(target+1))return true;
     return false;
 }
 
@@ -476,7 +528,8 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
     for (auto& in : inputs) {
         if (in.level == 0) {
             auto it = std::make_unique<SSTableIterator>(in.filepath, cache,
-                                                          in.manifest_seq, false, &merged_aborted);
+                                                          in.manifest_seq, false, &merged_aborted,
+                                                          &in.block_offsets, &in.block_first_key_buf);
             if (it->Valid()) sources.emplace_back(std::move(it));
         }
     }
@@ -488,7 +541,8 @@ void SSTable::Compact(const std::vector<Metadata>& inputs,
     for (auto& [lvl, files] : level_groups) {
         for (auto& meta : files) {
             auto it = std::make_unique<SSTableIterator>(meta.filepath, cache,
-                                                          meta.manifest_seq, false, &merged_aborted);
+                                                          meta.manifest_seq, false, &merged_aborted,
+                                                          &meta.block_offsets, &meta.block_first_key_buf);
             if (it->Valid()) sources.emplace_back(std::move(it));
         }
     }

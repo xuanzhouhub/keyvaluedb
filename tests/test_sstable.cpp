@@ -13,12 +13,8 @@
 
 namespace {
 struct NullBlockReader : kvdb::BlockReader {
-    bool GetBloom(uint64_t, kvdb::BloomFilter&) override { return false; }
-    void PutBloom(uint64_t, const kvdb::BloomFilter&) override {}
-    bool GetBlockOffsets(uint64_t, std::vector<uint64_t>&,
-                         std::vector<std::string>&) override { return false; }
-    void PutBlockOffsets(uint64_t, const std::vector<uint64_t>&,
-                         const std::vector<std::string>&) override {}
+    std::shared_ptr<const kvdb::CachedHeavy> GetHeavy(uint64_t) override { return nullptr; }
+    void PutHeavy(uint64_t, kvdb::BloomFilter, std::vector<uint64_t>, std::string) override {}
     std::shared_ptr<const std::string> GetBlock(uint64_t, uint32_t) override { return nullptr; }
     void PutBlock(uint64_t, uint32_t, std::string) override {}
     void Invalidate(uint64_t) override {}
@@ -269,7 +265,7 @@ void TestBlockIndexLookup() {
 
     auto meta = kvdb::SSTable::ReadMetadata("./test_sstable_data/blockidx.sst");
     ASSERT_TRUE(meta.block_offsets.size() > 1);
-    ASSERT_EQ(meta.block_offsets.size(), meta.block_first_keys.size());
+    ASSERT_EQ(meta.block_offsets.size(), meta.FirstKeyCount());
 
     for (int i = 0; i < 500; ++i) {
         std::string v;
@@ -534,22 +530,19 @@ void TestCacheBloomOffsets() {
 
     kvdb::BloomFilter bf(100, 0.01);
     bf.Add("foo");
-    cache.PutBloom(seq, bf);
-
-    kvdb::BloomFilter bf_out;
-    ASSERT_TRUE(cache.GetBloom(seq, bf_out));
-    ASSERT_TRUE(bf_out.BitCount() > 0);
 
     std::vector<uint64_t> offsets = {100, 200, 300};
-    std::vector<std::string> first_keys = {"a", "m", "z"};
-    cache.PutBlockOffsets(seq, offsets, first_keys);
+    std::string first_key_buf;
+    first_key_buf.push_back('\x01'); first_key_buf.push_back('\0'); first_key_buf += "a";
+    first_key_buf.push_back('\x01'); first_key_buf.push_back('\0'); first_key_buf += "m";
+    first_key_buf.push_back('\x01'); first_key_buf.push_back('\0'); first_key_buf += "z";
+    cache.PutHeavy(seq, bf, offsets, first_key_buf);
 
-    std::vector<uint64_t> off_out;
-    std::vector<std::string> fk_out;
-    ASSERT_TRUE(cache.GetBlockOffsets(seq, off_out, fk_out));
-    ASSERT_EQ(3u, off_out.size());
-    ASSERT_EQ("a", fk_out[0]);
-    ASSERT_EQ("z", fk_out[2]);
+    auto heavy = cache.GetHeavy(seq);
+    ASSERT_TRUE(heavy != nullptr);
+    ASSERT_TRUE(heavy->bloom.BitCount() > 0);
+    ASSERT_EQ(3u, heavy->block_offsets.size());
+    ASSERT_EQ(100u, heavy->block_offsets[0]);
 }
 
 void TestCacheInvalidate() {
@@ -611,14 +604,14 @@ void TestCacheUpdate() {
     ASSERT_TRUE(sp != nullptr);
     ASSERT_TRUE(*sp == "new");
 
-    cache.PutBloom(5, kvdb::BloomFilter(10, 0.01));
-    kvdb::BloomFilter bf(100, 0.01);
-    bf.Add("test");
-    cache.PutBloom(5, bf);
+    cache.PutHeavy(5, kvdb::BloomFilter(10, 0.01), std::vector<uint64_t>{}, std::string{});
+    kvdb::BloomFilter bf2(100, 0.01);
+    bf2.Add("test");
+    cache.PutHeavy(5, bf2, std::vector<uint64_t>{}, std::string{});
 
-    kvdb::BloomFilter bf_out;
-    ASSERT_TRUE(cache.GetBloom(5, bf_out));
-    ASSERT_TRUE(bf_out.BitCount() > 0);
+    auto heavy = cache.GetHeavy(5);
+    ASSERT_TRUE(heavy != nullptr);
+    ASSERT_TRUE(heavy->bloom.BitCount() > 0);
 }
 
 } // namespace kvdb_test

@@ -194,7 +194,7 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
                     meta.max_key = std::move(full.max_key);
                     meta.bloom = std::move(full.bloom);
                     meta.block_offsets = std::move(full.block_offsets);
-                    meta.block_first_keys = std::move(full.block_first_keys);
+                    meta.block_first_key_buf = std::move(full.block_first_key_buf);
                     meta.aborted_batch_ts = std::move(full.aborted_batch_ts);
                 } catch (...) {}
             }
@@ -636,7 +636,8 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
             if (meta.level == 0) {
                 try {
                     auto iter = std::make_unique<SSTableIterator>(meta.filepath,
-                        *sst_cache_, meta.manifest_seq, true, &meta.aborted_batch_ts);
+                        *sst_cache_, meta.manifest_seq, true, &meta.aborted_batch_ts,
+                        &meta.block_offsets, &meta.block_first_key_buf);
                     if (iter->Valid()) {
                         if (!lower.IsUnbounded()) iter->SeekToKey(lower.key);
                         if (iter->Valid()) sources.push_back(std::move(iter));

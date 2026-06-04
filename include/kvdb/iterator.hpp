@@ -65,14 +65,22 @@ struct SSTableIterator : SourceIterator {
     std::string filepath_;
     const std::unordered_set<uint64_t>* aborted_ = nullptr;
 
+    // For block-index-based SeekToKey
+    const std::vector<uint64_t>* block_offsets_ = nullptr;
+    const std::string* block_first_key_buf_ = nullptr;
+
     SSTableIterator(const std::string& filepath,
-                    const std::unordered_set<uint64_t>* aborted = nullptr);
+                    const std::unordered_set<uint64_t>* aborted = nullptr,
+                    const std::vector<uint64_t>* offsets = nullptr,
+                    const std::string* first_key_buf = nullptr);
 
     SSTableIterator(const std::string& filepath,
                     BlockReader& reader,
                     uint64_t manifest_seq,
                     bool populate = true,
-                    const std::unordered_set<uint64_t>* aborted = nullptr);
+                    const std::unordered_set<uint64_t>* aborted = nullptr,
+                    const std::vector<uint64_t>* offsets = nullptr,
+                    const std::string* first_key_buf = nullptr);
 
     ~SSTableIterator() { if (file.is_open()) file.close(); }
 
@@ -88,9 +96,12 @@ struct SSTableIterator : SourceIterator {
         } while (aborted_ && aborted_->count(current.timestamp));
     }
 
+    void SeekToKey(const std::string& key) override;
+
 private:
     uint32_t read_u32() { uint32_t v=0; v|=uint8_t(file.get()); v|=uint8_t(file.get())<<8; v|=uint8_t(file.get())<<16; v|=uint8_t(file.get())<<24; return v; }
     void ReadNextBlock();
+    void JumpToBlock(uint32_t block_idx);
     static void DecompressBlock(uint8_t comp, std::string& data);
 };
 
@@ -132,8 +143,10 @@ public:
 private:
     std::unique_ptr<SSTableIterator> MakeIter(const SSTable::Metadata& m) {
         if (reader_)
-            return std::make_unique<SSTableIterator>(m.filepath, *reader_, m.manifest_seq, true, &m.aborted_batch_ts);
-        return std::make_unique<SSTableIterator>(m.filepath, &m.aborted_batch_ts);
+            return std::make_unique<SSTableIterator>(m.filepath, *reader_, m.manifest_seq, true, &m.aborted_batch_ts,
+                                                     &m.block_offsets, &m.block_first_key_buf);
+        return std::make_unique<SSTableIterator>(m.filepath, &m.aborted_batch_ts,
+                                                 &m.block_offsets, &m.block_first_key_buf);
     }
 
     void OpenNext() {

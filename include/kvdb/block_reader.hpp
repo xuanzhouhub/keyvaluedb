@@ -9,23 +9,24 @@
 
 namespace kvdb {
 
+struct CachedHeavy {
+    BloomFilter bloom;
+    std::vector<uint64_t> block_offsets;
+    std::string block_first_key_buf;
+};
+
 class BlockReader {
 public:
     virtual ~BlockReader() = default;
 
-    virtual bool GetBloom(uint64_t seq, BloomFilter& bloom_out) = 0;
-    virtual void PutBloom(uint64_t seq, const BloomFilter& bloom) = 0;
-
-    virtual bool GetBlockOffsets(uint64_t seq,
-                                 std::vector<uint64_t>& offsets_out,
-                                 std::vector<std::string>& first_keys_out) = 0;
-    virtual void PutBlockOffsets(uint64_t seq,
-                                 const std::vector<uint64_t>& offsets,
-                                 const std::vector<std::string>& first_keys) = 0;
+    virtual std::shared_ptr<const CachedHeavy> GetHeavy(uint64_t seq) = 0;
+    virtual void PutHeavy(uint64_t seq,
+                          BloomFilter bloom,
+                          std::vector<uint64_t> offsets,
+                          std::string first_key_buf) = 0;
 
     virtual std::shared_ptr<const std::string> GetBlock(
         uint64_t seq, uint32_t block_idx) = 0;
-
     virtual void PutBlock(uint64_t seq, uint32_t block_idx,
                           std::string data) = 0;
 

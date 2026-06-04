@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -34,8 +35,37 @@ public:
         std::string max_key;
         BloomFilter bloom;
         std::vector<uint64_t> block_offsets;
-        std::vector<std::string> block_first_keys;
+        std::string block_first_key_buf;
         std::unordered_set<uint64_t> aborted_batch_ts;
+
+        size_t FirstKeyCount() const { return block_offsets.size(); }
+        bool FirstKeysEmpty() const { return block_first_key_buf.empty(); }
+        std::string FirstKey(size_t i) const {
+            const char* p = block_first_key_buf.data();
+            const char* end = p + block_first_key_buf.size();
+            for (size_t j = 0; j < i && p < end; ++j) {
+                uint16_t kl = static_cast<uint16_t>(static_cast<uint8_t>(p[0]) | (static_cast<uint8_t>(p[1]) << 8));
+                p += 2 + kl;
+            }
+            if (p < end) {
+                uint16_t kl = static_cast<uint16_t>(static_cast<uint8_t>(p[0]) | (static_cast<uint8_t>(p[1]) << 8));
+                return std::string(p + 2, kl);
+            }
+            return {};
+        }
+        std::string_view FirstKeyView(size_t i) const {
+            const char* p = block_first_key_buf.data();
+            const char* end = p + block_first_key_buf.size();
+            for (size_t j = 0; j < i && p < end; ++j) {
+                uint16_t kl = static_cast<uint16_t>(static_cast<uint8_t>(p[0]) | (static_cast<uint8_t>(p[1]) << 8));
+                p += 2 + kl;
+            }
+            if (p < end) {
+                uint16_t kl = static_cast<uint16_t>(static_cast<uint8_t>(p[0]) | (static_cast<uint8_t>(p[1]) << 8));
+                return std::string_view(p + 2, kl);
+            }
+            return {};
+        }
     };
 
     static bool LookupKey(const std::string& filepath, const std::string& key,
