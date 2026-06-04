@@ -15,6 +15,16 @@ engine.Insert("key", "value");
 // Delete (tombstone)
 engine.Delete("key");
 
+// Batch write (all-or-nothing atomic commit)
+engine.StartBatch();                      // reserve 1M timestamps
+engine.BatchInsert("k1", "v1");          // uses reserved batch_ts_
+engine.BatchInsert("k2", "v2");
+engine.BatchDelete("k3");                // tombstone with batch_ts_
+bool ok = engine.CommitBatch();          // direct WAL fsync, makes entries visible
+// or engine.AbortBatch();               // marks batch_ts as aborted, filters out reads
+
+// Compare-And-Swap (CAS)
+
 // Point lookup (MVCC snapshot)
 std::string value;
 bool found = engine.Lookup("key", value);
@@ -88,12 +98,13 @@ kvdb::SSTable::WriteFromWalk(filepath, walk, entry_count, cache, manifest_seq);
 auto read = kvdb::SSTable::ReadAll("path.sst");
 
 // Read metadata only (bloom filter, key range, entry count, block index)
-// Always reads file header from disk; caches heavy fields via BlockReader.
+// Bulk-read I/O: reads header (24B) + filter area (218KB) in 2 file.read() calls.
+// Caches bloom + offsets + first_key_buf. Returns cached data on subsequent calls.
 auto meta = kvdb::SSTable::ReadMetadata("path.sst", cache, manifest_seq);
 // meta.filepath, meta.entry_count, meta.file_size
 // meta.manifest_seq     — monotonic sequence for cache keying
 // meta.min_key, meta.max_key, meta.bloom
-// meta.block_offsets, meta.block_first_keys
+// meta.block_offsets, meta.block_first_key_buf  (flat buffer, not vector<string>)
 // meta.min_key_len, meta.max_key_len
 // meta.source_table_id, meta.level
 
@@ -112,31 +123,28 @@ kvdb::SSTable::Compact(inputs, output_dir, output_seq_start,
 #include <kvdb/block_reader.hpp>
 #include <kvdb/block_cache.hpp>
 
-// BlockReader — pure virtual interface for block cache
-class BlockReader {
-    virtual bool GetBloom(uint64_t seq, BloomFilter& bloom_out) = 0;
-    virtual void PutBloom(uint64_t seq, const BloomFilter& bloom) = 0;
-    virtual bool GetBlockOffsets(uint64_t seq,
-                                 std::vector<uint64_t>& offsets_out,
-                                 std::vector<std::string>& first_keys_out) = 0;
-    virtual void PutBlockOffsets(uint64_t seq,
-                                 const std::vector<uint64_t>& offsets,
-                                 const std::vector<std::string>& first_keys) = 0;
-    virtual bool GetBlock(uint64_t seq, uint32_t block_idx,
-                          std::string& data_out, uint32_t& entry_count_out) = 0;
-    virtual void PutBlock(uint64_t seq, uint32_t block_idx,
-                          const std::string& data, uint32_t entry_count) = 0;
-    virtual void Invalidate(uint64_t seq) = 0;  // evict all entries for seq
+// CachedHeavy — metadata stored in cache (no copies on get)
+struct CachedHeavy {
+    BloomFilter bloom;
+    std::vector<uint64_t> block_offsets;
+    std::string block_first_key_buf;
 };
 
-// SSTableCache — LRU implementation with two-partition eviction
-// Keys: uint64_t manifest_seq (not filepath)
-// Block keys: (seq << 32) | block_idx
-SSTableCache cache(1024, 256, 64 * 1024 * 1024);
-//                 blocks metadata max_bytes
+// BlockReader — pure virtual interface (shared_ptr, no copies)
+class BlockReader {
+    virtual std::shared_ptr<const CachedHeavy> GetHeavy(uint64_t seq) = 0;
+    virtual void PutHeavy(uint64_t seq, BloomFilter bloom,
+                          std::vector<uint64_t> offsets, std::string buf) = 0;
+    virtual std::shared_ptr<const std::string> GetBlock(
+        uint64_t seq, uint32_t block_idx) = 0;
+    virtual void PutBlock(uint64_t seq, uint32_t block_idx,
+                          std::string data) = 0;
+    virtual void Invalidate(uint64_t seq) = 0;
+};
 
-// Engine uses it internally:
-// std::unique_ptr<BlockReader> sst_cache_ = std::make_unique<SSTableCache>();
+// SSTableCache — uses FlatCache (flat-array LRU, open-addressing, intrusive LRU)
+// Keys: uint64_t manifest_seq. Block keys: (seq << 32) | block_idx
+SSTableCache cache(1024, 256, 64 * 1024 * 1024, 16);  // blocks, meta, bytes, shards
 ```
 
 ## `WAL`
@@ -154,16 +162,29 @@ wal.TrimToLastCheckpoint();             // discard old entries
 wal.Clear();                            // truncate everything
 ```
 
-## `KVCache`
+## `KVCache` / `FlatCache`
 
 ```cpp
 #include <kvdb/kv_cache.hpp>
+#include <kvdb/internal/flat_cache.hpp>
 
-// Internal LRU key-value cache for point lookups
+// KVCache: Internal LRU key-value cache for point lookups
 // Write-through: populated after WAL sync in Insert()
 // Tombstones erase cache entries
 // Blobs (> 2KB) are not cached
 // Default: 10K entries / 16MB
+
+// FlatCache<K,V>: Reusable flat-array, open-addressing, intrusive-LRU
+// template used by both SSTableCache and (in future) KVCache.
+// No per-node heap allocations. Stores shared_ptr<const V>, returns
+// shared_ptr on Get (no data copies). Configurable SizeBytes for byte-aware
+// eviction. Tombstone-safe open addressing.
+kvdb::internal::FlatCache<int, std::string> cache(1024, 64*1024*1024, 16);
+cache.Put(42, std::make_shared<std::string>("value"));
+auto v = cache.Get(42);  // shared_ptr<const std::string>
+cache.Erase(42);
+cache.EraseIf([](int k) { return k > 100; });  // batch erase
+```
 ```
 
 ## `Manifest`
@@ -294,8 +315,11 @@ Config::kLargeValFlag               // 0x7FFF (value > page/2)
 #include <kvdb/iterator.hpp>
 
 // SSTableIterator — cache-aware or standalone
+// Constructors accept optional block_offsets and block_first_key_buf
+// for block-index-based SeekToKey (O(log N) block-level seek)
 SSTableIterator(filepath);                                    // no cache (compaction)
-SSTableIterator(filepath, BlockReader&, manifest_seq, populate);  // cache-aware
+SSTableIterator(filepath, BlockReader&, manifest_seq, populate,
+                aborted, offsets, first_key_buf);             // cache-aware, indexed seek
 
 // LevelIterator — chains non-overlapping SSTables within a level
 LevelIterator(files);  // constructs 1-arg SSTableIterators internally
