@@ -63,6 +63,8 @@
 
 ### WAL
 - `Buffer(key, value, ts)` → in-memory buffer (non-blocking). `Sync()` → fsync, returns batch seq.
+- **Batch Write**: `StartBatch()` reserves a block of 1M timestamps (`batch_ts_`), blocks normal inserts only if global_ts_ approaches the reserved range. `BatchInsert`/`BatchDelete` write with `batch_ts_` and wait for async sync worker (same as single Insert). `CommitBatch()` writes a commit sentinel and calls **direct `wal_->Sync()`** (dedicated fsync) — this is the dominant cost for small batches (~400 us per commit). `AbortBatch()` writes abort sentinel, marks `batch_ts_` as aborted on all memtables + SSTable metadata (entries remain physically present but filtered at read time).
+- **Batch performance**: large batches (5K+) approach single-insert throughput (1.1–1.3M/s). Small batches (10–100) are dominated by CommitBatch fsync (~400 us/commit). The async sync worker already batches normal inserts; CommitBatch could piggyback on it instead of doing a dedicated fsync.
 - Per-entry CRC32. `Recover(checkpoint_ts)` — reads from last checkpoint, returns entries after it.
 - `WriteCheckpoint(ts)` — sentinel record `[CRC32][0xFFFFFFFF][ts:8B]`.
 - `TrimToLastCheckpoint()` — truncates WAL before last checkpoint.
@@ -138,6 +140,8 @@
 | Write 4KB | 60,000/s | 22,000/s |
 | Write 16KB | 17,000/s | 9,950/s |
 | Write 64KB (blob) | 4,500/s | — |
+| **Batch Write 5000**  | 1,143,000/s | 52,000/s |
+| **Batch Delete 5000** | 1,330,000/s | — |
 | Read KV HIT 1-thr | 310,000/s | 43,100/s |
 | Read KV HIT 4-thr | 1,040,000/s | 98,500/s |
 | Read KV HIT 8-thr | 1,620,000/s | 157,000/s |
