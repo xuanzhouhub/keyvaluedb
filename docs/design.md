@@ -9,8 +9,8 @@ Client (TCP)
 ┌─────────────────────────────────┐
 │  Server (connection threads)     │  Reads: inline via MVCC snapshot
 │    ┌─────────────────────────┐   │  Writes: enqueue → single writer
-│    │  Write Queue (16MB cap) │   │
-│    └───────────┬─────────────┘   │
+│    │  Write Queue (16MB cap) │   │  Sync W/D: blocks until persisted
+│    └───────────┬─────────────┘   │  Async w/d: returns after enqueue
 └────────────────┼─────────────────┘
                  │
 ┌────────────────▼─────────────────┐
@@ -305,6 +305,9 @@ Two queues: normal (write_queue_, priority) + batch (batch_queue_, secondary).
 
 Writer loop:
   Normal writes: always first — pop one, process, repeat.
+    Sync (W/D):  Wait for persistence, then respond to client.
+    Async (w/d): Respond OK immediately after enqueue. No persistence wait.
+    Both go through same write_queue_ and WriterLoop path.
   Batch writes: enqueued async. Writer drains in mini-batches.
 
 Mini-batch triggers:
