@@ -125,7 +125,7 @@
 ### Server/Client
 - TCP server: connection-per-client threads, single writer queue, concurrent reads via MVCC.
 - **WriterLoop**: polls `write_queue_cv_` with `kWALIdleSyncUs` timeout. Drains ALL normal requests per iteration. Calls `engine_.Insert/Delete` (returns immediately), pushes to `pending_writes_`, resolves promises via `checkAndFulfill()` which polls `SyncedSequence()`. `checkAndFulfill()` runs at top of every loop iteration — even idle.
-- **Batch commit (server)**: Writer calls `CommitBatchAsync()` (non-blocking), sets `commit_finalizing_`. `checkAndFulfill()` calls `CommitBatchFinalize()` when synced, clears `batch_commit_pending_`, notifies client handler.
+- **Batch commit (server)**: `HandleClient` sets `batch_commit_requested_` (wakes Writer) and `batch_commit_pending_` (blocks client). Writer picks up via `batch_commit_requested_`, calls `CommitBatchAsync()`, sets `commit_finalizing_`, clears `batch_commit_requested_`. `checkAndFulfill()` calls `CommitBatchFinalize()` when synced, clears `batch_commit_pending_`, notifies client handler. The two flags prevent the Writer `wait_for` predicate from busy-spinning while waiting for sync.
 - Binary protocol: `W + key + value` (write), `R + key` (read), `O/V/N/E` (responses).
 - Byte-capped write queue (16MB) with CV-based backpressure.
 - `timeBeginPeriod(1)` at `Start()` for ~1ms timer resolution.

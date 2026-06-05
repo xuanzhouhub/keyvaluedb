@@ -276,6 +276,7 @@ void Server::HandleClient(socket_t client_sock) {
             {
                 std::lock_guard<std::mutex> lock(write_queue_mutex_);
                 batch_commit_pending_ = true;
+                batch_commit_requested_ = true;
             }
             write_queue_cv_.notify_one();
 
@@ -298,6 +299,7 @@ void Server::HandleClient(socket_t client_sock) {
                     batch_queue_.pop();
                 }
                 batch_commit_pending_ = false;
+                batch_commit_requested_ = false;
             }
             write_queue_not_full_cv_.notify_all();
 
@@ -424,7 +426,7 @@ void Server::WriterLoop() {
             std::unique_lock<std::mutex> lock(write_queue_mutex_);
             write_queue_cv_.wait_for(lock, std::chrono::microseconds(Config::kWALIdleSyncUs), [this] {
                 return !write_queue_.empty() || !batch_queue_.empty()
-                    || batch_commit_pending_ || should_stop_.load()
+                    || batch_commit_requested_ || should_stop_.load()
                     || pending_cas_.busy;
             });
         }
@@ -497,7 +499,7 @@ void Server::WriterLoop() {
             std::lock_guard<std::mutex> lock(write_queue_mutex_);
             trigger = (batch_queue_.size() >= mini_batch_size_)
                    || (batch_queue_bytes_ >= max_queue_bytes_ / 2)
-                   || batch_commit_pending_;
+                   || batch_commit_requested_;
             if (!trigger) continue;
 
             commit_mode = batch_commit_pending_;
@@ -528,6 +530,7 @@ void Server::WriterLoop() {
         if (commit_mode) {
             engine_.CommitBatchAsync();
             commit_finalizing_ = true;
+            batch_commit_requested_ = false;
         }
 
         checkAndFulfill();

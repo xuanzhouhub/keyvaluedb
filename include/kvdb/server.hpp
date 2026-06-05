@@ -70,6 +70,7 @@ private:
     size_t batch_queue_bytes_ = 0;
     size_t mini_batch_size_ = Config::kDefaultMiniBatchSize;
     bool batch_commit_pending_ = false;
+    bool batch_commit_requested_ = false;
     bool commit_finalizing_ = false;
 
     struct PendingCAS {
