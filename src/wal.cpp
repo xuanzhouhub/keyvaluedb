@@ -116,6 +116,7 @@ void WAL::BufferBatchBegin(uint64_t batch_ts) {
 void WAL::BufferBatchCommit(uint64_t batch_ts) {
     std::lock_guard<std::mutex> lock(mutex_);
     WriteSentinelRecord(0xFFFFFFFC, batch_ts, write_buf_);
+    batch_seq_++;
 }
 
 void WAL::WriteCheckpoint(uint64_t timestamp, uint64_t batch_ts) {
