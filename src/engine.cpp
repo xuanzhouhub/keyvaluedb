@@ -48,7 +48,7 @@ struct kvdb::CompactionState {
 };
 
 static void SyncWorkerLoop(kvdb::EngineSyncState* s) {
-    auto last_forced = std::chrono::steady_clock::now();
+    auto last_synced = std::chrono::steady_clock::now();
     while (!s->should_stop.load()) {
         bool timed_out = false;
         {
@@ -59,30 +59,29 @@ static void SyncWorkerLoop(kvdb::EngineSyncState* s) {
         }
 
         bool force = false;
+        auto now = std::chrono::steady_clock::now();
         if (timed_out) {
-            auto now = std::chrono::steady_clock::now();
-            if (now - last_forced > std::chrono::milliseconds(Config::kWALIdleSyncMs)) {
+            if (now - last_synced > std::chrono::milliseconds(Config::kWALIdleSyncMs)) {
                 force = true;
-                last_forced = now;
             }
-        } else {
-            last_forced = std::chrono::steady_clock::now();
+        }
+        if (!force && now - last_synced > std::chrono::milliseconds(Config::kWALIdleSyncMs)) {
+            force = true;
         }
 
-        size_t synced = s->wal->Sync(force);
-
-        {
+        auto result = s->wal->Sync(force);
+        if (force) last_synced = std::chrono::steady_clock::now();
+        if (result.persisted) {
             std::lock_guard<std::mutex> lock(s->mtx);
-            s->synced_seq = synced;
+            s->synced_seq = result.seq;
+            s->cv.notify_all();
         }
-
-        s->cv.notify_all();
     }
 
-    size_t synced = s->wal->Sync(true);
+    auto result = s->wal->Sync(true);
     {
         std::lock_guard<std::mutex> lock(s->mtx);
-        s->synced_seq = synced;
+        s->synced_seq = result.seq;
     }
     s->cv.notify_all();
 }
@@ -840,7 +839,18 @@ bool LSMTreeEngine::CommitBatch() {
     if (!batch_in_progress_) return false;
 
     wal_->BufferBatchCommit(batch_ts_);
-    wal_->Sync();
+    size_t commit_seq = wal_->CurrentBatchSeq();
+    {
+        std::unique_lock<std::mutex> slock(sync_->mtx);
+        sync_->requested_seq = commit_seq;
+        sync_->ready_cv.notify_one();
+    }
+    {
+        std::unique_lock<std::mutex> slock(sync_->mtx);
+        sync_->cv.wait(slock, [this, commit_seq] {
+            return sync_->synced_seq >= commit_seq;
+        });
+    }
 
     global_ts_.store(batch_ts_ + 1);
     batch_in_progress_ = false;

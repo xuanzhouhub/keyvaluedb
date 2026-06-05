@@ -31,7 +31,8 @@ public:
 
     void WriteCheckpoint(uint64_t timestamp, uint64_t batch_ts = 0);
 
-    size_t Sync(bool force = true);
+    struct SyncResult { size_t seq; bool persisted; };
+    SyncResult Sync(bool force = true);
 
     size_t CurrentBatchSeq() const;
 
