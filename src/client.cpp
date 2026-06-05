@@ -98,6 +98,19 @@ bool Client::Write(const std::string& key, const std::string& value) {
     return false;
 }
 
+bool Client::WriteAsync(const std::string& key, const std::string& value) {
+    if (sock_ == kInvalidSocket) return false;
+
+    unsigned char req = Protocol::kAsyncWriteReq;
+    if (!SendAll(sock_, &req, 1)) return false;
+    if (!SendString(sock_, key)) return false;
+    if (!SendString(sock_, value)) return false;
+
+    unsigned char resp;
+    if (!RecvAll(sock_, &resp, 1)) return false;
+    return resp == Protocol::kOkResp;
+}
+
 bool Client::Read(const std::string& key, std::string& value_out) {
     if (sock_ == kInvalidSocket) return false;
 
@@ -118,6 +131,23 @@ bool Client::Read(const std::string& key, std::string& value_out) {
 bool Client::Delete(const std::string& key) {
     if (sock_ == kInvalidSocket) return false;
     unsigned char req = Protocol::kDeleteReq;
+    if (!SendAll(sock_, &req, 1)) return false;
+    if (!SendString(sock_, key)) return false;
+
+    unsigned char resp;
+    if (!RecvAll(sock_, &resp, 1)) return false;
+    if (resp == Protocol::kOkResp) return true;
+
+    if (resp == Protocol::kErrorResp) {
+        std::string msg;
+        RecvString(sock_, msg);
+    }
+    return false;
+}
+
+bool Client::DeleteAsync(const std::string& key) {
+    if (sock_ == kInvalidSocket) return false;
+    unsigned char req = Protocol::kAsyncDeleteReq;
     if (!SendAll(sock_, &req, 1)) return false;
     if (!SendString(sock_, key)) return false;
 

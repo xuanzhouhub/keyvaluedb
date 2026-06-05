@@ -265,8 +265,10 @@ server.Stop();
 // Client
 kvdb::Client client;
 client.Connect("127.0.0.1", 9000);
-client.Write("key", "value");
-client.Delete("key");
+client.Write("key", "value");             // sync: blocks until persisted
+client.Delete("key");                     // sync: blocks until persisted
+client.WriteAsync("key", "value");        // async: returns after enqueue (~30 us)
+client.DeleteAsync("key");                // async: returns after enqueue (~24 us)
 std::string val;
 bool found = client.Read("key", val);
 std::vector<KeyValuePair> results;

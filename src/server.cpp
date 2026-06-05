@@ -235,6 +235,62 @@ void Server::HandleClient(socket_t client_sock) {
             SendAll(client_sock, &resp, 1);
             if (!result) SendString(client_sock, "delete failed");
 
+        } else if (req_type == Protocol::kAsyncWriteReq) {
+            if (!RecvUint32(client_sock, key_len)) break;
+            key.resize(key_len);
+            if (!RecvAll(client_sock, &key[0], key_len)) break;
+
+            if (!RecvUint32(client_sock, value_len)) break;
+            value.resize(value_len);
+            if (!RecvAll(client_sock, &value[0], value_len)) break;
+
+            WriteRequest req;
+            req.key = std::move(key);
+            req.value = std::move(value);
+            req.client_sock = client_sock;
+
+            {
+                std::unique_lock<std::mutex> lock(write_queue_mutex_);
+                size_t req_size = req.key.size() + req.value.size();
+                write_queue_not_full_cv_.wait(lock, [this, req_size] {
+                    return queue_bytes_ + req_size <= max_queue_bytes_
+                        || should_stop_.load();
+                });
+                if (should_stop_.load()) break;
+                queue_bytes_ += req_size;
+                write_queue_.push(std::move(req));
+            }
+            write_queue_cv_.notify_one();
+
+            unsigned char resp = Protocol::kOkResp;
+            SendAll(client_sock, &resp, 1);
+
+        } else if (req_type == Protocol::kAsyncDeleteReq) {
+            if (!RecvUint32(client_sock, key_len)) break;
+            key.resize(key_len);
+            if (!RecvAll(client_sock, &key[0], key_len)) break;
+
+            WriteRequest req;
+            req.key = std::move(key);
+            req.value.clear();
+            req.is_delete = true;
+            req.client_sock = client_sock;
+
+            {
+                std::unique_lock<std::mutex> lock(write_queue_mutex_);
+                write_queue_not_full_cv_.wait(lock, [this] {
+                    return queue_bytes_ + 64 <= max_queue_bytes_
+                        || should_stop_.load();
+                });
+                if (should_stop_.load()) break;
+                queue_bytes_ += 64;
+                write_queue_.push(std::move(req));
+            }
+            write_queue_cv_.notify_one();
+
+            unsigned char resp = Protocol::kOkResp;
+            SendAll(client_sock, &resp, 1);
+
         } else if (req_type == Protocol::kBatchWriteReq) {
             if (!RecvUint32(client_sock, key_len)) break;
             key.resize(key_len);

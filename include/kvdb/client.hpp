@@ -21,8 +21,10 @@ public:
     bool IsConnected() const { return sock_ != kInvalidSocket; }
 
     bool Write(const std::string& key, const std::string& value);
+    bool WriteAsync(const std::string& key, const std::string& value);
     bool Read(const std::string& key, std::string& value_out);
     bool Delete(const std::string& key);
+    bool DeleteAsync(const std::string& key);
     bool RangeScan(const RangeBound& lower, const RangeBound& upper,
                    std::vector<KeyValuePair>& results);
     bool PrefixScan(const std::string& prefix,

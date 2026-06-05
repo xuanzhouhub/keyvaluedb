@@ -126,7 +126,8 @@
 - TCP server: connection-per-client threads, single writer queue, concurrent reads via MVCC.
 - **WriterLoop**: polls `write_queue_cv_` with `kWALIdleSyncUs` timeout. Drains ALL normal requests per iteration. Calls `engine_.Insert/Delete` (returns immediately), pushes to `pending_writes_`, resolves promises via `checkAndFulfill()` which polls `SyncedSequence()`. `checkAndFulfill()` runs at top of every loop iteration — even idle.
 - **Batch commit (server)**: `HandleClient` sets `batch_commit_requested_` (wakes Writer) and `batch_commit_pending_` (blocks client). Writer picks up via `batch_commit_requested_`, calls `CommitBatchAsync()`, sets `commit_finalizing_`, clears `batch_commit_requested_`. `checkAndFulfill()` calls `CommitBatchFinalize()` when synced, clears `batch_commit_pending_`, notifies client handler. The two flags prevent the Writer `wait_for` predicate from busy-spinning while waiting for sync.
-- Binary protocol: `W + key + value` (write), `R + key` (read), `O/V/N/E` (responses).
+- Binary protocol: `W + key + value` (sync write), `w + key + value` (async write), `D + key` (sync delete), `d + key` (async delete), `R + key` (read), `O/V/N/E` (responses).
+- Async writes respond OK immediately after enqueue (no persistence wait). Queue backpressure still applies via `write_queue_not_full_cv_`.
 - Byte-capped write queue (16MB) with CV-based backpressure.
 - `timeBeginPeriod(1)` at `Start()` for ~1ms timer resolution.
 
@@ -143,6 +144,10 @@
 | Write 16B 4-thr | — | 2,322/s |
 | Write 16B 8-thr | — | 4,078/s |
 | Write 16B 16-thr | — | 8,135/s |
+| **Async write 16B 1-thr** | — | **31,069/s** |
+| **Async write 16B 4-thr** | — | **122,290/s** |
+| **Async write 16B 16-thr** | — | **183,960/s** |
+| **Async write 1KB 8-thr** | — | **124,290/s** (121 MB/s) |
 | Read KV HIT 1-thr | 310,000/s | 43,100/s |
 | Read KV HIT 4-thr | 1,040,000/s | 98,500/s |
 | Read KV HIT 8-thr | 1,620,000/s | 157,000/s |
