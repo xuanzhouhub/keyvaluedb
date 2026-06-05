@@ -13,6 +13,7 @@
 - You are responsible for documentation and comprehensive testing.
 - After making changes, always build and run tests to verify.
 - **CRC COVERAGE RULE**: Every byte written to an SSTable file MUST be covered by a CRC. If you add a new metadata section to the SSTable format, place it inside the `CRC-COVERED REGION` markers in `src/sstable.cpp` (between `filter_off` and `meta_end`). If you add a new data section, give it a per-section CRC. Add `docs/design.md` CRC coverage table entry. Write a test that corrupts the new section and verifies the CRC catches it.
+- **WRITE BENCHMARKING**: The system has a single-writer thread. Write throughput must be tested via multiple concurrent clients to saturate the write queue. Never call `Insert()` from multiple threads directly — use the client-server infrastructure. For client-side tests, spawn many client connections writing concurrently. For server-side tests, verify `write_queue_` is never empty. Batch writes are the exception — only one client at a time since concurrent batches are rejected.
 
 ## User Instructions
 
