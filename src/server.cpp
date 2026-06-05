@@ -500,6 +500,7 @@ void Server::WriterLoop() {
         checkAndFulfill();
 
         // Drain ALL normal requests
+        size_t drain_count = 0;
         while (!batch_commit_pending_) {
             WriteRequest normal_req;
             bool has_normal = false;
@@ -509,6 +510,7 @@ void Server::WriterLoop() {
                 auto& front = write_queue_.front();
                 if (pending_cas_.busy
                     && (front.is_cas || front.key == pending_cas_.key)) {
+                    if (deferred_requests_.size() >= Config::kMaxCasDeferred) break;
                     deferred_requests_.push_back(std::move(front));
                     write_queue_.pop();
                     continue;
@@ -546,6 +548,8 @@ void Server::WriterLoop() {
                 resolvePromise(normal_req, false);
             }
             checkAndFulfill();
+
+            if (pending_cas_.busy && ++drain_count >= Config::kMaxCasDeferred) break;
         }
 
         bool trigger = false;

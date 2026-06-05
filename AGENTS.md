@@ -128,6 +128,7 @@
 - **Batch commit (server)**: `HandleClient` sets `batch_commit_requested_` (wakes Writer) and `batch_commit_pending_` (blocks client). Writer picks up via `batch_commit_requested_`, calls `CommitBatchAsync()`, sets `commit_finalizing_`, clears `batch_commit_requested_`. `checkAndFulfill()` calls `CommitBatchFinalize()` when synced, clears `batch_commit_pending_`, notifies client handler. The two flags prevent the Writer `wait_for` predicate from busy-spinning while waiting for sync.
 - Binary protocol: `W + key + value` (sync write), `w + key + value` (async write), `D + key` (sync delete), `d + key` (async delete), `R + key` (read), `O/V/N/E` (responses).
 - Async writes respond OK immediately after enqueue (no persistence wait). Queue backpressure still applies via `write_queue_not_full_cv_`.
+- **CAS**: synchronous. Writer defers conflicting requests to `deferred_requests_`. Drain loop bounded by `kMaxCasDeferred` (64): stop draining and re-check CAS after 64 non-conflicting requests or when `deferred_requests_` hits the cap. CAS Lookup runs on `std::async` thread; Writer poll-spins (microseconds) until ready.
 - Byte-capped write queue (16MB) with CV-based backpressure.
 - `timeBeginPeriod(1)` at `Start()` for ~1ms timer resolution.
 
