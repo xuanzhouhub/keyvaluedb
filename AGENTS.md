@@ -63,9 +63,12 @@
 - Last block's `first_key` correctly set in `WriteFromWalk` (line 217).
 
 ### WAL
-- `Buffer(key, value, ts)` → in-memory buffer (non-blocking). `Sync()` → fsync, returns batch seq.
-- **Batch Write**: `StartBatch()` reserves a block of 1M timestamps (`batch_ts_`), blocks normal inserts only if global_ts_ approaches the reserved range. `BatchInsert`/`BatchDelete` write with `batch_ts_` and wait for async sync worker (same as single Insert). `CommitBatch()` writes a commit sentinel and calls **direct `wal_->Sync()`** (dedicated fsync) — this is the dominant cost for small batches (~400 us per commit). `AbortBatch()` writes abort sentinel, marks `batch_ts_` as aborted on all memtables + SSTable metadata (entries remain physically present but filtered at read time).
-- **Batch performance**: large batches (5K+) approach single-insert throughput (1.1–1.3M/s). Small batches (10–100) are dominated by CommitBatch fsync (~400 us/commit). The async sync worker already batches normal inserts; CommitBatch could piggyback on it instead of doing a dedicated fsync.
+- `Buffer(key, value, ts)` → in-memory buffer (non-blocking). `Sync(force)` → if force or buffer ≥ 4MB: fwrite+fflush+fsync, returns `{seq, true}`. If !force and buffer < 4MB: bump counter only, returns `{seq, false}`.
+- **Group Commit**: `SyncWorkerLoop` polls `ready_cv` (200us timeout). If `requested_seq > synced_seq`, wakes immediately. On timeout or idle, checks timer: if idle for `kWALIdleSyncUs` (default 200us), forces fsync. Updates `synced_seq` (atomic) on persist. No CV notification — Writer polls `synced_seq` independently.
+  - `kWALIdleSyncUs = 200` — configurable tradeoff: shorter = lower latency, longer = larger batches per fsync.
+  - `kWALMinSyncBytes = 4MB` — throughput: buffer must reach this for non-forced sync.
+  - `timeBeginPeriod(1)` called at server startup for ~1ms timer resolution on Windows.
+- **Batch Write**: `StartBatch()` reserves 1M timestamps. `BatchInsert`/`BatchDelete` buffer in WAL, return seq immediately (same as Insert). `CommitBatch()` polls `synced_seq` atomically (no CV wait). `CommitBatchAsync()` buffers commit sentinel + notifies sync; `CommitBatchFinalize()` idempotently swaps `global_ts_` when `synced_seq >= commit_seq`. Server uses Async+Finalize for non-blocking batch commit.
 - Per-entry CRC32. `Recover(checkpoint_ts)` — reads from last checkpoint, returns entries after it.
 - `WriteCheckpoint(ts)` — sentinel record `[CRC32][0xFFFFFFFF][ts:8B]`.
 - `TrimToLastCheckpoint()` — truncates WAL before last checkpoint.
@@ -76,7 +79,7 @@
 - Stores `manifest_seq` for each SSTable on recovery.
 
 ### Engine
-- **Write**: `Insert()` → WAL::Buffer → bg sync worker → memtable insert → if full: freeze → DoFlush → Manifest::Add → WAL::Checkpoint.
+- **Write**: `Insert()` → WAL::Buffer → notify SyncWorker → memtable insert → return `uint64_t` seq (~1 us). Non-blocking — no internal `cv.wait`. Persistence gated by `synced_seq` (atomic, advanced by SyncWorker). Writer polls `SyncedSequence()` to fulfill client promises.
 - **Lookup**: `Lookup(key)` → check KV Cache → snapshot `read_ts` → check MemTable (active + frozen) → SSTables (bloom+range filter, newest-first, L0 then L1+ binary search, BlockReader cache-aware).
 - **Tombstone in LookupKey**: when `fl&1` (tombstone), returns `true` with empty value so the engine stops searching older SSTables and returns false.
 - **Recovery**: MANIFEST → rebuild SSTable catalog → WAL from last checkpoint → replay → flush → checkpoint. Manifest recovery populates `manifest_seq` and loads bloom/range metadata from files.
@@ -121,8 +124,11 @@
 
 ### Server/Client
 - TCP server: connection-per-client threads, single writer queue, concurrent reads via MVCC.
+- **WriterLoop**: polls `write_queue_cv_` with `kWALIdleSyncUs` timeout. Drains ALL normal requests per iteration. Calls `engine_.Insert/Delete` (returns immediately), pushes to `pending_writes_`, resolves promises via `checkAndFulfill()` which polls `SyncedSequence()`. `checkAndFulfill()` runs at top of every loop iteration — even idle.
+- **Batch commit (server)**: Writer calls `CommitBatchAsync()` (non-blocking), sets `commit_finalizing_`. `checkAndFulfill()` calls `CommitBatchFinalize()` when synced, clears `batch_commit_pending_`, notifies client handler.
 - Binary protocol: `W + key + value` (write), `R + key` (read), `O/V/N/E` (responses).
 - Byte-capped write queue (16MB) with CV-based backpressure.
+- `timeBeginPeriod(1)` at `Start()` for ~1ms timer resolution.
 
 ### Tests
 - 10 test suites: `test_memtable`, `test_sstable`, `test_engine`, `test_wal`, `test_manifest`, `test_server`, `test_wfw`, `test_small`, `test_restart`, `test_flat_cache`.
@@ -133,16 +139,10 @@
 
 | Scenario | Engine Direct | Via Server |
 |----------|-------------|------------|
-| Write 16B 1-thr | 1,085,000/s | 36,600/s |
-| Write 16B 4-thr | — | 107,000/s |
-| Write 16B 8-thr | — | 173,000/s |
-| Write 128B | 650,000/s | 35,800/s |
-| Write 1KB | 126,000/s | 26,200/s |
-| Write 4KB | 60,000/s | 22,000/s |
-| Write 16KB | 17,000/s | 9,950/s |
-| Write 64KB (blob) | 4,500/s | — |
-| **Batch Write 5000**  | 1,143,000/s | 52,000/s |
-| **Batch Delete 5000** | 1,330,000/s | — |
+| Write 16B 1-thr | 946,000/s | 513/s |
+| Write 16B 4-thr | — | 2,322/s |
+| Write 16B 8-thr | — | 4,078/s |
+| Write 16B 16-thr | — | 8,135/s |
 | Read KV HIT 1-thr | 310,000/s | 43,100/s |
 | Read KV HIT 4-thr | 1,040,000/s | 98,500/s |
 | Read KV HIT 8-thr | 1,620,000/s | 157,000/s |
@@ -151,8 +151,9 @@
 | **Range scan** 100 entries | 4,194,000/s | — |
 | **Range scan** 1,000 entries | 9,641,000/s | — |
 | **Range scan** 5,000 entries | 11,068,000/s | — |
-| Mixed 1R+1W | r=360K w=1.05M total=945K/s | r=41.8K w=28.7K total=70.5K/s |
 
+- **Engine Insert**: ~1 us (946K/s) — non-blocking, return immediately
+- **Server write latency**: ~1.9 ms/write (1-thr, 16B) — dominated by `_commit` fsync (~0.86ms) + Writer poll interval (~1ms)
 - **SSTable::LookupKey warm**: ~4 us (250K/s) — GetHeavy + block index scan + block read
 - **Engine Lookup warm**: ~5 us (200K/s) — KV cache miss + memtable + SSTable path
 - **Engine Lookup KV HIT**: ~2 us (500K/s)
@@ -169,3 +170,4 @@
 | — | BlockReader API: merged GetBloom+GetBlockOffsets → GetHeavy/PutHeavy (shared_ptr, no copies) | **Done** |
 | — | LookupKey warm path: reads CachedHeavy directly, no data copies | **Done** |
 | — | Cache index from 0 (removed manifest_seq != 0 check) | **Done** |
+| — | Group commit: non-blocking Insert, atomic synced_seq, polling Writer | **Done** |

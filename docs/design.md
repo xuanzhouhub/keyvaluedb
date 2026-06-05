@@ -16,10 +16,10 @@ Client (TCP)
 ┌────────────────▼─────────────────┐
 │  LSMTreeEngine                   │
 │                                   │
-│  Insert → WAL::Buffer → Sync    │
-│         → MemTable::Insert      │
-│         → If full: Freeze       │
-│             → notify FlushWorker│
+│  Insert → WAL::Buffer → return seq (non-blocking)   │
+│         → MemTable::Insert       │
+│         → If full: Freeze        │
+│             → notify FlushWorker │
 │                                   │
 │  FlushWorker (background):       │
 │         → DoFlush → SSTable     │
@@ -221,7 +221,7 @@ Key: compact uses the 1-arg `SSTableIterator(filepath)` constructor with `reader
 | Thread | Role | Cardinality |
 |--------|------|-------------|
 | Writer | Dequeues from write queue, calls `Insert()` | **1** (server `WriterLoop`) |
-| WAL sync worker | Periodically `fsync`s WAL buffer to disk | **1** (`EngineSyncState`) |
+| WAL sync worker | Periodically fsyncs WAL buffer; advances `synced_seq` (atomic). Writer polls it, no CV notification. | **1** (`EngineSyncState`) |
 | Flush worker | Drains `frozen_memtables_`, writes SSTables | **1** (`FlushState`) |
 | Compaction worker | Merges SSTables across levels when threshold reached | **1** (`CompactionState`) |
 | Readers | `HandleClient` threads calling `Lookup()` / `RangeScan()` | **N** (connection threads) |
@@ -244,7 +244,7 @@ Key: compact uses the 1-arg `SSTableIterator(filepath)` constructor with `reader
 Locks C and E are independent (mutex per queue) — acquired without nesting with each other.
 
 Separate from the above — acquired without nesting:
-- `sync_->mtx` — WAL sync coordination
+- `sync_->mtx` — WAL sync worker coordination (`ready_cv`)
 - `wal_` internal mutex — WAL buffer / file
 - `manifest_` internal mutex — MANIFEST file
 - `SSTableCache` internal mutex — cache operations
@@ -252,25 +252,24 @@ Separate from the above — acquired without nesting:
 ### Write Path (Writer thread)
 
 ```
-Insert(key, value):
+Insert(key, value) → uint64_t:
   1. ts = global_ts_.fetch_add(1) + 1            ← atomic, no lock
   2. wal_->Buffer(key, value, ts)                 ← wal_ mutex
   3. notify WAL sync worker                       ← sync_->mtx
   4. Lock B: unique_lock<shared_mutex>
-       active_memtable_->Insert(key, value, ts)   ← single writer, no internal lock needed
-       if IsFull():
-         Freeze → push to frozen_memtables_
-         Lock A: flush_->pending++
-         notify flush worker via flush_->cv
-         swap active_memtable_
-     Unlock B
-  5. Wait for WAL sync: sync_->cv.wait(synced_seq >= my_seq)
-  6. kv_cache_->Put(key, value, ts)               ← KV cache write-through
-  7. DrainRecyclePending()
-       Lock C → Lock B (in order)
+        active_memtable_->Insert(key, value, ts)   ← single writer, no internal lock needed
+        if IsFull():
+          Freeze → push to frozen_memtables_
+          Lock A: flush_->pending++
+          notify flush worker via flush_->cv
+          swap active_memtable_
+      Unlock B
+  5. kv_cache_->Put(key, value, ts)               ← KV cache write-through
+  6. DrainRecyclePending()
+  7. return my_seq                                 ← non-blocking, no cv.wait
 ```
 
-Key point: the SSTable flush has been moved to the **Flush worker**. The writer only freezes the memtable and notifies the worker — it never blocks on disk I/O.
+**Server Writer** polls `SyncedSequence()` (atomic) in `checkAndFulfill()` to resolve client promises when data is persisted. Writer never blocks — Insert returns in ~1 us. Persistence gated by `synced_seq` (advanced by SyncWorker on real fsync, atomic store).
 
 ### Batch Write Path
 
@@ -450,12 +449,14 @@ The flush worker holds no locks during disk I/O (`DoFlush`). It only takes B bri
 SyncWorkerLoop:
   loop:
     wait for ready_cv (requested_seq > synced_seq) or timeout 200µs
-    wal_->Sync()                                   ← wal_ mutex + fsync
-    synced_seq = batch_seq
-    notify cv (wakes writers waiting on sync)
+    if timed out or idle > kWALIdleSyncUs (200us):
+      force = true
+    result = wal_->Sync(force)
+    if result.persisted:
+      synced_seq.store(result.seq, mo_release)       ← atomic, no CV notification
 ```
 
-Group commit: the sync worker batches multiple `Buffer()` calls into one `fsync`. Writers wait on `sync_->cv` after their batch seq becomes durable.
+**Group commit**: SyncWorker batches multiple `Buffer()` calls into one fsync. Writer polls `synced_seq` (atomic) independently — no CV wait. SyncWorker's only job is advancing `synced_seq` on real fsync. Writer discovers persistence by polling at top of every loop iteration. `kWALIdleSyncUs` controls the tradeoff: lower = lower latency, higher = larger batches per fsync.
 
 ### MemTable Recycling
 

@@ -9,18 +9,22 @@ All public API in the `kvdb` namespace.
 
 kvdb::LSMTreeEngine engine("./data", 4*1024*1024);
 
-// Write (blocks until durable)
-engine.Insert("key", "value");
+// Write (non-blocking, returns WAL seq for tracking persistence)
+uint64_t seq = engine.Insert("key", "value");      // returns immediately (~1 us)
+uint64_t synced = engine.SyncedSequence();         // last persisted seq (atomic)
 
 // Delete (tombstone)
-engine.Delete("key");
+uint64_t seq = engine.Delete("key");
 
 // Batch write (all-or-nothing atomic commit)
 engine.StartBatch();                      // reserve 1M timestamps
 engine.BatchInsert("k1", "v1");          // uses reserved batch_ts_
 engine.BatchInsert("k2", "v2");
 engine.BatchDelete("k3");                // tombstone with batch_ts_
-bool ok = engine.CommitBatch();          // direct WAL fsync, makes entries visible
+bool ok = engine.CommitBatch();          // blocks until persisted (polls synced_seq)
+// Non-blocking variant (used by server WriterLoop):
+// engine.CommitBatchAsync();            // buffer commit sentinel + notify sync worker
+// engine.CommitBatchFinalize();         // finish when synced_seq >= commit_seq
 // or engine.AbortBatch();               // marks batch_ts as aborted, filters out reads
 
 // Compare-And-Swap (CAS)
@@ -169,7 +173,7 @@ wal.Clear();                            // truncate everything
 #include <kvdb/internal/flat_cache.hpp>
 
 // KVCache: Internal LRU key-value cache for point lookups
-// Write-through: populated after WAL sync in Insert()
+// Write-through: populated during Insert() (non-blocking write)
 // Tombstones erase cache entries
 // Blobs (> 2KB) are not cached
 // Default: 10K entries / 16MB

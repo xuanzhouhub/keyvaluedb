@@ -35,6 +35,7 @@ private:
     void ListenerLoop();
     void HandleClient(socket_t client_sock);
     void WriterLoop();
+    void checkAndFulfill();
 
     LSMTreeEngine& engine_;
     int port_;
@@ -54,10 +55,12 @@ private:
         bool is_delete = false;
         bool is_batch = false;
         bool is_cas = false;
+        uint64_t seq = 0;
     };
 
     std::queue<WriteRequest> write_queue_;
     std::queue<WriteRequest> batch_queue_;
+    std::deque<WriteRequest> pending_writes_;
     std::mutex write_queue_mutex_;
     std::condition_variable write_queue_cv_;
     std::condition_variable write_queue_not_full_cv_;
@@ -67,6 +70,7 @@ private:
     size_t batch_queue_bytes_ = 0;
     size_t mini_batch_size_ = Config::kDefaultMiniBatchSize;
     bool batch_commit_pending_ = false;
+    bool commit_finalizing_ = false;
 
     struct PendingCAS {
         std::string key;

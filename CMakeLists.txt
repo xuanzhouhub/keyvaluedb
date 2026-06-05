@@ -28,7 +28,7 @@ target_include_directories(kvdb_lib PUBLIC
 )
 
 if(WIN32)
-    target_link_libraries(kvdb_lib PUBLIC ws2_32)
+    target_link_libraries(kvdb_lib PUBLIC ws2_32 winmm)
 endif()
 
 if(KVDB_BUILD_TESTS)

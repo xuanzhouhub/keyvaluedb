@@ -21,10 +21,9 @@ namespace kvdb {
 struct kvdb::EngineSyncState {
     std::thread worker;
     std::mutex mtx;
-    std::condition_variable cv;
     std::condition_variable ready_cv;
     size_t requested_seq = 0;
-    size_t synced_seq = 0;
+    std::atomic<uint64_t> synced_seq{0};
     std::atomic<bool> should_stop{false};
     WAL* wal = nullptr;
 };
@@ -54,36 +53,30 @@ static void SyncWorkerLoop(kvdb::EngineSyncState* s) {
         {
             std::unique_lock<std::mutex> lock(s->mtx);
             timed_out = !s->ready_cv.wait_for(lock, std::chrono::microseconds(200), [s] {
-                return s->should_stop.load() || s->requested_seq > s->synced_seq;
+                return s->should_stop.load() || s->requested_seq > s->synced_seq.load();
             });
         }
 
         bool force = false;
         auto now = std::chrono::steady_clock::now();
         if (timed_out) {
-            if (now - last_synced > std::chrono::milliseconds(Config::kWALIdleSyncMs)) {
+            if (now - last_synced > std::chrono::microseconds(Config::kWALIdleSyncUs)) {
                 force = true;
             }
         }
-        if (!force && now - last_synced > std::chrono::milliseconds(Config::kWALIdleSyncMs)) {
+        if (!force && now - last_synced > std::chrono::microseconds(Config::kWALIdleSyncUs)) {
             force = true;
         }
 
         auto result = s->wal->Sync(force);
         if (force) last_synced = std::chrono::steady_clock::now();
         if (result.persisted) {
-            std::lock_guard<std::mutex> lock(s->mtx);
-            s->synced_seq = result.seq;
-            s->cv.notify_all();
+            s->synced_seq.store(result.seq, std::memory_order_release);
         }
     }
 
     auto result = s->wal->Sync(true);
-    {
-        std::lock_guard<std::mutex> lock(s->mtx);
-        s->synced_seq = result.seq;
-    }
-    s->cv.notify_all();
+    s->synced_seq.store(result.seq, std::memory_order_release);
 }
 
 void LSMTreeEngine::FlushWorkerLoop() {
@@ -320,7 +313,7 @@ void LSMTreeEngine::RecoverFromWAL() {
     wal_->Sync();
 }
 
-void LSMTreeEngine::Insert(const std::string& key, const std::string& value) {
+uint64_t LSMTreeEngine::Insert(const std::string& key, const std::string& value) {
     if (key.size() > Config::kMaxKeyBytes) {
         throw std::invalid_argument(
             "Key size (" + std::to_string(key.size())
@@ -370,19 +363,12 @@ void LSMTreeEngine::Insert(const std::string& key, const std::string& value) {
         }
     }
 
-    {
-        std::unique_lock<std::mutex> lock(sync_->mtx);
-        sync_->cv.wait(lock, [this, my_seq] {
-            return sync_->synced_seq >= my_seq;
-        });
-    }
-
     kv_cache_->Put(key, value, ts);
-
     DrainRecyclePending();
+    return my_seq;
 }
 
-void LSMTreeEngine::Delete(const std::string& key) {
+uint64_t LSMTreeEngine::Delete(const std::string& key) {
     if (key.size() > Config::kMaxKeyBytes) {
         throw std::invalid_argument(
             "Key size (" + std::to_string(key.size())
@@ -425,16 +411,9 @@ void LSMTreeEngine::Delete(const std::string& key) {
         }
     }
 
-    {
-        std::unique_lock<std::mutex> lock(sync_->mtx);
-        sync_->cv.wait(lock, [this, my_seq] {
-            return sync_->synced_seq >= my_seq;
-        });
-    }
-
     kv_cache_->Erase(key);
-
     DrainRecyclePending();
+    return my_seq;
 }
 
 bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const {
@@ -839,24 +818,55 @@ bool LSMTreeEngine::CommitBatch() {
     if (!batch_in_progress_) return false;
 
     wal_->BufferBatchCommit(batch_ts_);
-    size_t commit_seq = wal_->CurrentBatchSeq();
+    batch_commit_seq_ = wal_->CurrentBatchSeq();
     {
         std::unique_lock<std::mutex> slock(sync_->mtx);
-        sync_->requested_seq = commit_seq;
+        sync_->requested_seq = batch_commit_seq_;
         sync_->ready_cv.notify_one();
     }
-    {
-        std::unique_lock<std::mutex> slock(sync_->mtx);
-        sync_->cv.wait(slock, [this, commit_seq] {
-            return sync_->synced_seq >= commit_seq;
-        });
+
+    while (sync_->synced_seq.load(std::memory_order_acquire) < batch_commit_seq_) {
+        std::this_thread::yield();
     }
 
     global_ts_.store(batch_ts_ + 1);
     batch_in_progress_ = false;
+    batch_commit_seq_ = 0;
     lock.unlock();
     batch_cv_.notify_all();
     return true;
+}
+
+bool LSMTreeEngine::CommitBatchAsync() {
+    std::unique_lock<std::mutex> lock(batch_mutex_);
+    if (!batch_in_progress_) return false;
+
+    wal_->BufferBatchCommit(batch_ts_);
+    batch_commit_seq_ = wal_->CurrentBatchSeq();
+    {
+        std::unique_lock<std::mutex> slock(sync_->mtx);
+        sync_->requested_seq = batch_commit_seq_;
+        sync_->ready_cv.notify_one();
+    }
+    return true;
+}
+
+bool LSMTreeEngine::CommitBatchFinalize() {
+    std::unique_lock<std::mutex> lock(batch_mutex_);
+    if (!batch_in_progress_) return false;
+
+    if (sync_->synced_seq.load(std::memory_order_acquire) < batch_commit_seq_) return false;
+
+    global_ts_.store(batch_ts_ + 1);
+    batch_in_progress_ = false;
+    batch_commit_seq_ = 0;
+    lock.unlock();
+    batch_cv_.notify_all();
+    return true;
+}
+
+uint64_t LSMTreeEngine::SyncedSequence() const {
+    return sync_->synced_seq.load(std::memory_order_acquire);
 }
 
 bool LSMTreeEngine::AbortBatch() {
@@ -885,7 +895,7 @@ bool LSMTreeEngine::AbortBatch() {
     return true;
 }
 
-void LSMTreeEngine::BatchInsert(const std::string& key, const std::string& value) {
+uint64_t LSMTreeEngine::BatchInsert(const std::string& key, const std::string& value) {
     if (key.size() > Config::kMaxKeyBytes)
         throw std::invalid_argument("Key too large for batch");
     size_t entry_size = key.size() + value.size() + Config::kMemTableEntryOverheadBytes;
@@ -921,17 +931,11 @@ void LSMTreeEngine::BatchInsert(const std::string& key, const std::string& value
         }
     }
 
-    {
-        std::unique_lock<std::mutex> lock(sync_->mtx);
-        sync_->cv.wait(lock, [this, my_seq] {
-            return sync_->synced_seq >= my_seq;
-        });
-    }
-
     DrainRecyclePending();
+    return my_seq;
 }
 
-void LSMTreeEngine::BatchDelete(const std::string& key) {
+uint64_t LSMTreeEngine::BatchDelete(const std::string& key) {
     if (key.size() > Config::kMaxKeyBytes)
         throw std::invalid_argument("Key too large for batch");
 
@@ -964,14 +968,8 @@ void LSMTreeEngine::BatchDelete(const std::string& key) {
         }
     }
 
-    {
-        std::unique_lock<std::mutex> lock(sync_->mtx);
-        sync_->cv.wait(lock, [this, my_seq] {
-            return sync_->synced_seq >= my_seq;
-        });
-    }
-
     DrainRecyclePending();
+    return my_seq;
 }
 
 } // namespace kvdb

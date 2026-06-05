@@ -8,6 +8,7 @@
 
 #ifdef _WIN32
 #include <winsock2.h>
+#include <windows.h>
 using socklen_t = int;
 #else
 #include <sys/socket.h>
@@ -47,6 +48,10 @@ Server::~Server() {
 
 void Server::Start() {
     if (running_.load()) return;
+
+#ifdef _WIN32
+    timeBeginPeriod(1);
+#endif
 
     listen_sock_ = ::socket(AF_INET, SOCK_STREAM, 0);
     if (listen_sock_ == kInvalidSocket) {
@@ -111,6 +116,10 @@ void Server::Stop() {
     }
 
     running_ = false;
+
+#ifdef _WIN32
+    timeEndPeriod(1);
+#endif
 }
 
 void Server::ListenerLoop() {
@@ -383,12 +392,20 @@ void Server::WriterLoop() {
                 std::string current = pending_cas_.read_future.get();
                 bool swapped = !current.empty()
                     && current == pending_cas_.expected;
-                if (swapped)
-                    engine_.Insert(pending_cas_.key, pending_cas_.desired);
-
-                try {
-                    pending_cas_.promise.set_value(swapped);
-                } catch (...) {}
+                if (swapped) {
+                    WriteRequest cas_req;
+                    cas_req.key = std::move(pending_cas_.key);
+                    cas_req.value = std::move(pending_cas_.desired);
+                    cas_req.promise = std::move(pending_cas_.promise);
+                    try {
+                        cas_req.seq = engine_.Insert(cas_req.key, cas_req.value);
+                        pending_writes_.push_back(std::move(cas_req));
+                    } catch (...) {
+                        try { cas_req.promise.set_value(false); } catch (...) {}
+                    }
+                } else {
+                    try { pending_cas_.promise.set_value(false); } catch (...) {}
+                }
                 pending_cas_.busy = false;
 
                 {
@@ -405,7 +422,7 @@ void Server::WriterLoop() {
 
         {
             std::unique_lock<std::mutex> lock(write_queue_mutex_);
-            write_queue_cv_.wait(lock, [this] {
+            write_queue_cv_.wait_for(lock, std::chrono::microseconds(Config::kWALIdleSyncUs), [this] {
                 return !write_queue_.empty() || !batch_queue_.empty()
                     || batch_commit_pending_ || should_stop_.load()
                     || pending_cas_.busy;
@@ -422,25 +439,29 @@ void Server::WriterLoop() {
         }
         if (stop) break;
 
-        WriteRequest normal_req;
-        bool has_normal = false;
-        {
-            std::lock_guard<std::mutex> lock(write_queue_mutex_);
-            if (!write_queue_.empty() && !batch_commit_pending_) {
+        checkAndFulfill();
+
+        // Drain ALL normal requests
+        while (!batch_commit_pending_) {
+            WriteRequest normal_req;
+            bool has_normal = false;
+            {
+                std::lock_guard<std::mutex> lock(write_queue_mutex_);
+                if (write_queue_.empty()) break;
                 auto& front = write_queue_.front();
                 if (pending_cas_.busy
                     && (front.is_cas || front.key == pending_cas_.key)) {
                     deferred_requests_.push_back(std::move(front));
                     write_queue_.pop();
-                } else {
-                    normal_req = std::move(front);
-                    write_queue_.pop();
-                    queue_bytes_ -= (normal_req.key.size() + normal_req.value.size());
-                    has_normal = true;
+                    continue;
                 }
+                normal_req = std::move(front);
+                write_queue_.pop();
+                queue_bytes_ -= (normal_req.key.size() + normal_req.value.size());
+                has_normal = true;
             }
-        }
-        if (has_normal) {
+            if (!has_normal) break;
+
             write_queue_not_full_cv_.notify_one();
             if (normal_req.is_cas) {
                 pending_cas_.key = normal_req.key;
@@ -459,14 +480,14 @@ void Server::WriterLoop() {
 
             try {
                 if (normal_req.is_delete)
-                    engine_.Delete(normal_req.key);
+                    normal_req.seq = engine_.Delete(normal_req.key);
                 else
-                    engine_.Insert(normal_req.key, normal_req.value);
-                resolvePromise(normal_req, true);
+                    normal_req.seq = engine_.Insert(normal_req.key, normal_req.value);
+                pending_writes_.push_back(std::move(normal_req));
             } catch (const std::exception&) {
                 resolvePromise(normal_req, false);
             }
-            continue;
+            checkAndFulfill();
         }
 
         bool trigger = false;
@@ -493,25 +514,36 @@ void Server::WriterLoop() {
         try {
             for (auto& r : mini) {
                 if (r.is_delete)
-                    engine_.BatchDelete(r.key);
+                    r.seq = engine_.BatchDelete(r.key);
                 else
-                    engine_.BatchInsert(r.key, r.value);
+                    r.seq = engine_.BatchInsert(r.key, r.value);
             }
         } catch (...) {
             for (auto& r : mini) resolvePromise(r, false);
             continue;
         }
 
+        for (auto& r : mini) pending_writes_.push_back(std::move(r));
+
         if (commit_mode) {
-            engine_.CommitBatch();
-            {
-                std::lock_guard<std::mutex> lock(write_queue_mutex_);
-                batch_commit_pending_ = false;
-            }
-            batch_commit_done_cv_.notify_all();
+            engine_.CommitBatchAsync();
+            commit_finalizing_ = true;
         }
 
-        for (auto& r : mini) resolvePromise(r, true);
+        checkAndFulfill();
+    }
+}
+
+void Server::checkAndFulfill() {
+    uint64_t synced = engine_.SyncedSequence();
+    while (!pending_writes_.empty() && pending_writes_.front().seq <= synced) {
+        try { pending_writes_.front().promise.set_value(true); } catch (...) {}
+        pending_writes_.pop_front();
+    }
+    if (commit_finalizing_ && engine_.CommitBatchFinalize()) {
+        commit_finalizing_ = false;
+        batch_commit_pending_ = false;
+        batch_commit_done_cv_.notify_all();
     }
 }
 

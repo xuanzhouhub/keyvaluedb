@@ -40,15 +40,18 @@ public:
     LSMTreeEngine(const LSMTreeEngine&) = delete;
     LSMTreeEngine& operator=(const LSMTreeEngine&) = delete;
 
-    void Insert(const std::string& key, const std::string& value);
-    void Delete(const std::string& key);
+    uint64_t Insert(const std::string& key, const std::string& value);
+    uint64_t Delete(const std::string& key);
 
     bool StartBatch();
     bool CommitBatch();
+    bool CommitBatchAsync();       // non-blocking: buffer sentinel, notify worker
+    bool CommitBatchFinalize();    // call from checkAndFulfill: finish after persisted
     bool AbortBatch();
-    void BatchInsert(const std::string& key, const std::string& value);
-    void BatchDelete(const std::string& key);
+    uint64_t BatchInsert(const std::string& key, const std::string& value);
+    uint64_t BatchDelete(const std::string& key);
     uint64_t BatchGap() const { return batch_increment_gap_; }
+    uint64_t SyncedSequence() const;
 
     bool Lookup(const std::string& key, std::string& value_out) const;
 
@@ -132,6 +135,7 @@ private:
     bool batch_in_progress_ = false;
     uint64_t batch_ts_ = 0;
     bool batch_touched_ = false;
+    size_t batch_commit_seq_ = 0;
 
     std::unique_ptr<WAL> wal_;
     std::unique_ptr<Manifest> manifest_;
