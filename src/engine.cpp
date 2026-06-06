@@ -46,6 +46,10 @@ struct kvdb::CompactionState {
     LSMTreeEngine* engine = nullptr;
 };
 
+struct ScanPinned {
+    std::shared_ptr<const std::vector<SSTable::Metadata>> snap;
+};
+
 static void SyncWorkerLoop(kvdb::EngineSyncState* s) {
     auto last_synced = std::chrono::steady_clock::now();
     while (!s->should_stop.load()) {
@@ -577,8 +581,13 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
     uint64_t read_ts = global_ts_.load();
     tracker_.Acquire(read_ts);
 
-    std::shared_ptr<void> guard(new char, [this, read_ts](void* p) {
-        delete static_cast<char*>(p);
+    auto snap = SnapSSTableMetadata();
+
+    auto* sp = new ScanPinned;
+    sp->snap = snap;
+    std::shared_ptr<void> guard(sp, [this, read_ts](void* p) {
+        auto* pinned = static_cast<ScanPinned*>(p);
+        delete pinned;
         tracker_.Release(read_ts);
     });
 
@@ -604,37 +613,34 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
         }
     }
 
-    {
-        auto snap = SnapSSTableMetadata();
-        if (snap && !snap->empty()) {
-            std::map<int, std::vector<SSTable::Metadata>> groups;
-            for (const auto& meta : *snap) {
-            if (!upper.IsUnbounded() && !meta.min_key.empty() && meta.min_key > upper.key) continue;
-            if (!lower.IsUnbounded() && !meta.max_key.empty() && meta.max_key < lower.key) continue;
-            if (meta.level == 0) {
-                try {
-                    auto iter = std::make_unique<SSTableIterator>(meta.filepath,
-                        *sst_cache_, meta.manifest_seq, true, &meta.aborted_batch_ts,
-                        &meta.block_offsets, &meta.block_first_key_buf);
-                    if (iter->Valid()) {
-                        if (!lower.IsUnbounded()) iter->SeekToKey(lower.key);
-                        if (iter->Valid()) sources.push_back(std::move(iter));
-                    }
-                } catch (...) {}
-            } else {
-                groups[meta.level].push_back(meta);
-            }
-        }
-        for (auto& [lvl, files] : groups) {
+    if (snap && !snap->empty()) {
+        std::map<int, std::vector<SSTable::Metadata>> groups;
+        for (const auto& meta : *snap) {
+        if (!upper.IsUnbounded() && !meta.min_key.empty() && meta.min_key > upper.key) continue;
+        if (!lower.IsUnbounded() && !meta.max_key.empty() && meta.max_key < lower.key) continue;
+        if (meta.level == 0) {
             try {
-                auto li = std::make_unique<LevelIterator>(files, *sst_cache_);
-                if (li->Valid()) {
-                    if (!lower.IsUnbounded()) li->SeekToKey(lower.key);
-                    if (li->Valid()) sources.push_back(std::move(li));
+                auto iter = std::make_unique<SSTableIterator>(meta.filepath,
+                    *sst_cache_, meta.manifest_seq, true, &meta.aborted_batch_ts,
+                    &meta.block_offsets, &meta.block_first_key_buf);
+                if (iter->Valid()) {
+                    if (!lower.IsUnbounded()) iter->SeekToKey(lower.key);
+                    if (iter->Valid()) sources.push_back(std::move(iter));
                 }
             } catch (...) {}
+        } else {
+            groups[meta.level].push_back(meta);
         }
-        }
+    }
+    for (auto& [lvl, files] : groups) {
+        try {
+            auto li = std::make_unique<LevelIterator>(files, *sst_cache_);
+            if (li->Valid()) {
+                if (!lower.IsUnbounded()) li->SeekToKey(lower.key);
+                if (li->Valid()) sources.push_back(std::move(li));
+            }
+        } catch (...) {}
+    }
     }
 
     return RangeIterator(std::move(sources), read_ts, guard, lower, upper);
