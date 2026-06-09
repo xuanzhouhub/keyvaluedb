@@ -428,6 +428,12 @@ The flush worker holds no locks during disk I/O (`DoFlush`). It only takes B bri
 
 **Trigger**: Every 2s, counts SSTables per level. When level L reaches 8, compaction fires. To avoid wasted intermediate compactions, the worker checks consecutive levels: if L+1 also has ≥ 8, L+L+1 are compacted together into L+2.
 
+**Manual compaction API**:
+- `LevelCounts() → vector<size_t>` — returns per-level SSTable counts (L0=N, L1=M, ...)
+- `ManualCompact(min_sstables=2, from_level=0, cascade=true) → int` — scans levels from `from_level`, compacts first level with ≥ `min_sstables`. If `cascade`, continues through adjacent qualifying levels. Returns number of levels compacted, or 0 if no level qualifies, threshold < 2, or another compaction is in progress.
+- Protocol: `L` (no payload) → `V`+CSV string; `M + min_sst:4B + from_lvl:4B + cascade:1B` → `V`+count string
+- **Serialization**: `compaction_mutex_` with `try_lock` — at most one compaction runs at a time. Background worker and `ManualCompact` both try-lock; contending callers are rejected immediately (return 0 / skip cycle).
+
 **Algorithm** (`CompactLevel(from, top)` → `SSTable::Compact`):
 1. Snapshot `sstable_metadata_`, collect all SSTables from levels `from` through `top`
 2. Open iterators: individual `SSTableIterator` per L0 file (they overlap); one `LevelIterator` per L1+ level (chains non-overlapping files). All use 1-arg constructor (no cache interaction).
