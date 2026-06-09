@@ -112,6 +112,7 @@ SSTable files use a **block-structured binary layout** with per-block CRC32 chec
 
 ## Documentation
 
+- [Usage Guide](docs/usage.md)
 - [Design Document](docs/design.md)
 - [API Reference](docs/api.md)
 
