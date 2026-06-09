@@ -9,7 +9,6 @@
 #include <condition_variable>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <map>
 #include <sstream>
 #include <stdexcept>
@@ -174,10 +173,6 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
     manifest_ = std::make_unique<Manifest>(manifest_path);
 
     auto recovered_meta = manifest_->Recover();
-    std::cerr << "[Recovery] MANIFEST: " << recovered_meta.size() << " SSTables" << std::endl;
-    for (size_t i = 0; i < recovered_meta.size(); ++i)
-        std::cerr << "  [" << i << "] " << recovered_meta[i].filepath
-                  << " entries=" << recovered_meta[i].entry_count << std::endl;
     sstable_seq_ = recovered_meta.size();
 
     auto recovered_ptr = std::make_shared<std::vector<SSTable::Metadata>>(std::move(recovered_meta));
@@ -351,6 +346,10 @@ uint64_t LSMTreeEngine::Insert(const std::string& key, const std::string& value)
 
     active_memtable_->Insert(key, value, ts);
     active_memtable_->DrainRetired(tracker_.MinActiveTS());
+    while (active_memtable_->PendingRetiredSize() >= BPlusTree::kRetiredDrainThreshold) {
+        std::this_thread::yield();
+        active_memtable_->DrainRetired(tracker_.MinActiveTS());
+    }
 
     {
         std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
@@ -399,6 +398,10 @@ uint64_t LSMTreeEngine::Delete(const std::string& key) {
 
     active_memtable_->Insert(key, "", ts, true);
     active_memtable_->DrainRetired(tracker_.MinActiveTS());
+    while (active_memtable_->PendingRetiredSize() >= BPlusTree::kRetiredDrainThreshold) {
+        std::this_thread::yield();
+        active_memtable_->DrainRetired(tracker_.MinActiveTS());
+    }
 
     {
         std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
@@ -585,33 +588,71 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
 
     auto* sp = new ScanPinned;
     sp->snap = snap;
-    std::shared_ptr<void> guard(sp, [this, read_ts](void* p) {
-        auto* pinned = static_cast<ScanPinned*>(p);
-        delete pinned;
-        tracker_.Release(read_ts);
+    std::shared_ptr<void> guard(sp, [](void* p) {
+        delete static_cast<ScanPinned*>(p);
     });
 
     std::vector<std::unique_ptr<SourceIterator>> sources;
 
-    std::shared_ptr<MemTable> active_snapshot;
-    std::vector<std::shared_ptr<MemTable>> frozen_snapshot;
+    // ── Materialize memtable data and release read_ts early ──
+    auto materialize = [&](std::shared_ptr<MemTable> memtable) -> std::unique_ptr<MaterializedMemTableSource> {
+        if (!memtable || memtable->EntryCount() == 0) return nullptr;
+        BPlusTree::ReadGuard rd(&memtable->GetTree());
+        BPlusTree::LeafPage* first_copy = nullptr;
+        BPlusTree::LeafPage* prev_copy = nullptr;
+
+        for (const BPlusTree::LeafPage* leaf = memtable->GetTree().BeginLeafWalk().leaf;
+             leaf != nullptr; leaf = leaf->next) {
+            if (leaf->count == 0) continue;
+            bool in_range = true;
+            if (!lower.IsUnbounded() || !upper.IsUnbounded()) {
+                std::string_view first_k(leaf->Rec(0), leaf->KeyLen(0));
+                std::string_view last_k(leaf->Rec(leaf->count - 1), leaf->KeyLen(leaf->count - 1));
+                if (!lower.IsUnbounded()) {
+                    in_range = lower.inclusive ? (last_k >= lower.key) : (last_k > lower.key);
+                }
+                if (in_range && !upper.IsUnbounded()) {
+                    in_range = upper.inclusive ? (first_k <= upper.key) : (first_k < upper.key);
+                }
+            }
+            if (in_range) {
+                void* m = _aligned_malloc(BPlusTree::kPageSize, 4096);
+                auto* cp = new (m) BPlusTree::LeafPage();
+                cp->count = leaf->count;
+                cp->data_start = leaf->data_start;
+                cp->slot_end = leaf->slot_end;
+                cp->next = nullptr;
+                std::memcpy(cp->data, leaf->data, 4072);
+                if (prev_copy) prev_copy->next = cp;
+                else first_copy = cp;
+                prev_copy = cp;
+            }
+        }
+        if (!first_copy) return nullptr;
+        auto src = std::make_unique<MaterializedMemTableSource>(memtable, first_copy);
+        if (!lower.IsUnbounded()) src->SeekToKey(lower.key);
+        if (src->Valid()) return src;
+        return nullptr;
+    };
+
     {
-        std::shared_lock<std::shared_mutex> lock(memtable_mutex_);
-        active_snapshot = active_memtable_;
-        frozen_snapshot = frozen_memtables_;
-    }
-    if (active_snapshot->EntryCount() > 0) {
-        auto ms = std::make_unique<MemTableSource>(active_snapshot);
-        if (!lower.IsUnbounded()) ms->SeekToKey(lower.key);
-        if (ms->Valid()) sources.push_back(std::move(ms));
-    }
-    for (const auto& m : frozen_snapshot) {
-        if (m->EntryCount() > 0) {
-            auto ms = std::make_unique<MemTableSource>(m);
-            if (!lower.IsUnbounded()) ms->SeekToKey(lower.key);
-            if (ms->Valid()) sources.push_back(std::move(ms));
+        std::shared_ptr<MemTable> active_snapshot;
+        std::vector<std::shared_ptr<MemTable>> frozen_snapshot;
+        {
+            std::shared_lock<std::shared_mutex> lock(memtable_mutex_);
+            active_snapshot = active_memtable_;
+            frozen_snapshot = frozen_memtables_;
+        }
+        auto ms = materialize(active_snapshot);
+        if (ms) sources.push_back(std::move(ms));
+        for (const auto& m : frozen_snapshot) {
+            auto fs = materialize(m);
+            if (fs) sources.push_back(std::move(fs));
         }
     }
+
+    // ── Release read_ts from tracker now that memtable data is materialized ──
+    tracker_.Release(read_ts);
 
     if (snap && !snap->empty()) {
         std::map<int, std::vector<SSTable::Metadata>> groups;
@@ -678,12 +719,7 @@ void LSMTreeEngine::DoFlush(std::shared_ptr<MemTable> frozen_memtable) {
     SSTable::Metadata meta;
     try {
         meta = SSTable::ReadMetadata(filepath, sst_cache_.get(), seq);
-    } catch (const std::exception& e) {
-        std::cerr << "ReadMetadata failed: " << e.what() << std::endl;
-        auto entries = SSTable::ReadAll(filepath);
-        std::cerr << "ReadAll found " << entries.size() << " entries" << std::endl;
-        for (size_t i = 0; i < std::min(entries.size(), size_t(10)); ++i)
-            std::cerr << "  [" << i << "] " << entries[i].key << "=" << entries[i].value << " ts=" << entries[i].timestamp << std::endl;
+    } catch (const std::exception&) {
         throw;
     }
     meta.source_table_id = frozen_memtable->Id();
@@ -921,6 +957,10 @@ uint64_t LSMTreeEngine::BatchInsert(const std::string& key, const std::string& v
 
     active_memtable_->Insert(key, value, batch_ts_, false);
     active_memtable_->DrainRetired(tracker_.MinActiveTS());
+    while (active_memtable_->PendingRetiredSize() >= BPlusTree::kRetiredDrainThreshold) {
+        std::this_thread::yield();
+        active_memtable_->DrainRetired(tracker_.MinActiveTS());
+    }
 
     {
         std::unique_lock<std::shared_mutex> lock(memtable_mutex_);
@@ -958,6 +998,10 @@ uint64_t LSMTreeEngine::BatchDelete(const std::string& key) {
 
     active_memtable_->Insert(key, "", batch_ts_, true);
     active_memtable_->DrainRetired(tracker_.MinActiveTS());
+    while (active_memtable_->PendingRetiredSize() >= BPlusTree::kRetiredDrainThreshold) {
+        std::this_thread::yield();
+        active_memtable_->DrainRetired(tracker_.MinActiveTS());
+    }
 
     {
         std::unique_lock<std::shared_mutex> lock(memtable_mutex_);

@@ -34,8 +34,9 @@
 - **Lock-free reads**: SeqLock version check on internal nodes, immutable leaves (CoW).
 - **CoW writes**: Pre-built sub-tree, one spinlock + one pointer write per operation. Unified `SplitCoW` handles all levels.
 - **EBR**: `ReadGuard` announces readers; retired nodes stamped with fence timestamp; `DrainRetired(MinActiveTS)` reclaims when oldest reader has passed the fence. **Counter-based drain (active_readers_ == 0) is a TOCTOU race — must never gate node freeing.** Drain only via timestamp comparison or at destructor.
+- **Retired drain capping**: `kRetiredDrainBufSize=64` (local buffer arrays), `kRetiredDrainThreshold=60` (derived as `buf_size - kMaxBTreeDepth=4`). All write paths block with `std::this_thread::yield()` when `PendingRetiredSize() >= threshold`, preventing `DrainRetiredWithFence` local buffer overflow.
 - **Leaf pool**: 64 pooled 4KB leaves, placement-new reuse — eliminates `_aligned_malloc` per insert. Pool replenished only at destructor or engine-driven drain.
-- **Leaf chain range scan**: `MemTableSource` lazy iterates via `MemTableWalk` — no full materialization. `ExportEntries()` retained for tests only. `WriteFromWalk` uses `MemTableWalk` directly for flush.
+- **Leaf chain range scan**: `MemTableSource` lazy iterates via `MemTableWalk` (test/point paths). `MaterializedMemTableSource` deep-copies overlapping leaf pages for range scans — releases `read_ts` early to avoid blocking EBR drain. O(1) range-bound overlap check via first/last key per leaf. `ExportEntries()` retained for tests only. `WriteFromWalk` uses `MemTableWalk` directly for flush.
 - **Blob values**: `> page/2` stored as external blobs. Blob cleanup in destructor (MSVC codegen limitation).
 - **MVCC**: `Find()` returns leftmost match; new versions inserted left. `Lookup()` scans for visible timestamp.
 
@@ -80,6 +81,7 @@
 
 ### Engine
 - **Write**: `Insert()` → WAL::Buffer → notify SyncWorker → memtable insert → return `uint64_t` seq (~1 us). Non-blocking — no internal `cv.wait`. Persistence gated by `synced_seq` (atomic, advanced by SyncWorker). Writer polls `SyncedSequence()` to fulfill client promises.
+- **Retired drain**: After each Insert/Delete/BatchInsert/BatchDelete, calls `DrainRetired(MinActiveTS())`, then spin-yields while `PendingRetiredSize() >= kRetiredDrainThreshold` — blocks writer when retired node queue is near buffer capacity, preventing overflow in `DrainRetiredWithFence` local arrays.
 - **Lookup**: `Lookup(key)` → check KV Cache → snapshot `read_ts` → check MemTable (active + frozen) → SSTables (bloom+range filter, newest-first, L0 then L1+ binary search, BlockReader cache-aware).
 - **Tombstone in LookupKey**: when `fl&1` (tombstone), returns `true` with empty value so the engine stops searching older SSTables and returns false.
 - **Recovery**: MANIFEST → rebuild SSTable catalog → WAL from last checkpoint → replay → flush → checkpoint. Manifest recovery populates `manifest_seq` and loads bloom/range metadata from files.
@@ -117,7 +119,8 @@
 - Cache invalidation happens immediately at defer time via `sst_cache_->Invalidate(seq)`.
 
 ### Range Scan
-- **Merge iterator**: `RangeIterator` builds a min-heap over `MemTableSource` + `SSTableIterator` + `LevelIterator` sources. Pops smallest key, collects duplicates, resolves via MVCC (newest timestamp ≤ read_ts).
+- **Merge iterator**: `RangeIterator` builds a min-heap over `MaterializedMemTableSource` + `SSTableIterator` + `LevelIterator` sources. Pops smallest key, collects duplicates, resolves via MVCC (newest timestamp ≤ read_ts).
+- **Memtable materialization**: Before building iterators, `RangeScan` deep-copies overlapping leaf pages into standalone `_aligned_malloc`'d copies (`MaterializedMemTableSource`). Per-leaf range check is O(1) via first/last key bounds. `read_ts` is released immediately after materialization to avoid blocking EBR drain. `ScanPinned` guard pins SSTable metadata via `shared_ptr<void>`.
 - **SeekToKey**: `SSTableIterator` uses **block-index binary search** on `block_first_key_buf`, then jumps to the target block via `file.seekg(block_offsets[target])`. Linear scan within the target block only. Setup cost: ~29 us (was 1,300 us with entry-level linear scan). Iteration: ~950 ns/entry.
 - `SSTableIterator` constructors accept optional `block_offsets` and `block_first_key_buf` pointers for indexed seek. Engine RangeScan, Compaction, and LevelIterator pass these from snapshotted metadata.
 - Concurrent range scans served directly on client threads, scale near-linearly with thread count.

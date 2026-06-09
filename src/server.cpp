@@ -3,7 +3,6 @@
 
 #include <deque>
 #include <future>
-#include <iostream>
 #include <stdexcept>
 
 #ifdef _WIN32

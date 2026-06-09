@@ -48,6 +48,91 @@ struct MemTableSource : SourceIterator {
     }
 };
 
+struct MaterializedMemTableSource : SourceIterator {
+    std::shared_ptr<MemTable> ref;   // keeps blob storage alive
+    BPlusTree::LeafPage* first_leaf_ = nullptr;
+    BPlusTree::LeafPage* leaf_      = nullptr;
+    uint32_t pos_                   = 0;
+    KeyValuePair current_;
+
+    MaterializedMemTableSource() = default;
+
+    MaterializedMemTableSource(std::shared_ptr<MemTable> memtable,
+                               BPlusTree::LeafPage* first)
+        : ref(std::move(memtable)), first_leaf_(first), leaf_(first) {
+        while (leaf_ && leaf_->count == 0) leaf_ = leaf_->next;
+        if (leaf_) Load();
+    }
+
+    ~MaterializedMemTableSource() {
+        BPlusTree::LeafPage* p = first_leaf_;
+        while (p) {
+            BPlusTree::LeafPage* n = p->next;
+#ifdef _WIN32
+            _aligned_free(p);
+#else
+            free(p);
+#endif
+            p = n;
+        }
+    }
+
+    MaterializedMemTableSource(const MaterializedMemTableSource&) = delete;
+    MaterializedMemTableSource& operator=(const MaterializedMemTableSource&) = delete;
+    MaterializedMemTableSource(MaterializedMemTableSource&& other) noexcept
+        : ref(std::move(other.ref))
+        , first_leaf_(other.first_leaf_)
+        , leaf_(other.leaf_)
+        , pos_(other.pos_)
+        , current_(std::move(other.current_)) {
+        other.first_leaf_ = nullptr;
+        other.leaf_ = nullptr;
+    }
+    MaterializedMemTableSource& operator=(MaterializedMemTableSource&& other) noexcept {
+        if (this != &other) {
+            this->~MaterializedMemTableSource();
+            ref = std::move(other.ref);
+            first_leaf_ = other.first_leaf_; other.first_leaf_ = nullptr;
+            leaf_ = other.leaf_; other.leaf_ = nullptr;
+            pos_ = other.pos_;
+            current_ = std::move(other.current_);
+        }
+        return *this;
+    }
+
+    bool Valid() const override { return leaf_ != nullptr && pos_ < leaf_->count; }
+    const KeyValuePair& Current() const override { return current_; }
+    void Next() override { WalkNext(); }
+    void SeekToKey(const std::string& key) override {
+        while (Valid() && current_.key < key) WalkNext();
+    }
+
+private:
+    void Load() {
+        if (!leaf_ || pos_ >= leaf_->count) return;
+        current_.key.assign(leaf_->Rec(pos_), leaf_->KeyLen(pos_));
+        uint16_t vl = leaf_->ValLen(pos_);
+        if (vl == BPlusTree::kLargeValFlag) {
+            void* blob; std::memcpy(&blob, leaf_->Rec(pos_) + leaf_->KeyLen(pos_), sizeof(void*));
+            size_t sz; std::memcpy(&sz, blob, 8);
+            current_.value.assign(static_cast<const char*>(blob) + 8, sz);
+        } else {
+            current_.value.assign(leaf_->Rec(pos_) + leaf_->KeyLen(pos_), vl);
+        }
+        current_.timestamp = leaf_->Timestamp(pos_);
+        current_.is_tombstone = leaf_->IsTombstone(pos_);
+    }
+
+    void WalkNext() {
+        ++pos_;
+        if (leaf_ && pos_ >= leaf_->count) {
+            do { leaf_ = leaf_->next; } while (leaf_ && leaf_->count == 0);
+            pos_ = 0;
+        }
+        Load();
+    }
+};
+
 struct SSTableIterator : SourceIterator {
     std::ifstream file;
     std::string block_data;

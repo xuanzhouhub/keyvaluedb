@@ -19,6 +19,7 @@ public:
         : tree_(fence_source), id_(id), max_bytes_(max_bytes), frozen_(false) {}
 
     void DrainRetired(uint64_t min_ts) { tree_.DrainRetired(min_ts); }
+    size_t PendingRetiredSize() const { return tree_.PendingRetiredSize(); }
 
     MemTable(const MemTable&) = delete;
     MemTable& operator=(const MemTable&) = delete;

@@ -25,6 +25,9 @@ public:
     static constexpr size_t kPageSize = 4096;
     static constexpr size_t kInternalFanout = 16;
     static constexpr uint16_t kLargeValFlag = 0x7FFF;
+    static constexpr size_t kMaxBTreeDepth   = 4;
+    static constexpr size_t kRetiredDrainBufSize = 64;
+    static constexpr size_t kRetiredDrainThreshold = kRetiredDrainBufSize - kMaxBTreeDepth;
 
     struct alignas(4096) LeafPage {
         uint32_t count       = 0;
@@ -192,6 +195,7 @@ struct InternalNode {
     void Export(std::vector<KeyValuePair>& out) const;
     size_t Size() const { return count_; }
     size_t MemoryUsage() const { return memory_usage_; }
+    size_t PendingRetiredSize() const { return pending_retired_.size(); }
 #ifdef KVDB_PROFILE_TREE
     static void PrintProfile();
     static void ResetProfile();
@@ -445,15 +449,15 @@ private:
     std::vector<PendingRetire> pending_retired_;
 
     void DrainRetired(uint64_t min_active_ts) {
-        if (pending_retired_.size() < 64) return;
+        if (pending_retired_.size() < kRetiredDrainThreshold) return;
         DrainRetiredWithFence(min_active_ts);
     }
 
     void DrainRetiredWithFence(uint64_t min_ts) {
         size_t n = pending_retired_.size();
-        PendingRetire keep_buf[64];
-        LeafPage* erase_buf[64];
-        LeafPage* pool_buf[64];
+        PendingRetire keep_buf[kRetiredDrainBufSize];
+        LeafPage* erase_buf[kRetiredDrainBufSize];
+        LeafPage* pool_buf[kRetiredDrainBufSize];
         size_t keep_n = 0, erase_n = 0, pool_n = 0;
 
         for (size_t j = 0; j < n; ++j) {
@@ -463,7 +467,7 @@ private:
                 else {
                     r.leaf->~LeafPage();
                     erase_buf[erase_n++] = r.leaf;
-                    if (pool_n < Config::kLeafPoolSize) pool_buf[pool_n++] = r.leaf;
+                    if (pool_n < kRetiredDrainBufSize) pool_buf[pool_n++] = r.leaf;
                     else Free(r.leaf);
                 }
             } else {
