@@ -258,4 +258,48 @@ bool Client::CompareAndSwap(const std::string& key,
     return resp == Protocol::kOkResp;
 }
 
+std::vector<size_t> Client::LevelCounts() {
+    std::vector<size_t> result;
+    if (sock_ == kInvalidSocket) return result;
+
+    unsigned char req = Protocol::kLevelCountsReq;
+    if (!SendAll(sock_, &req, 1)) return result;
+
+    unsigned char resp;
+    if (!RecvAll(sock_, &resp, 1) || resp != Protocol::kValueResp) return result;
+
+    std::string enc;
+    if (!RecvString(sock_, enc)) return result;
+
+    size_t pos = 0;
+    while (pos <= enc.size()) {
+        size_t comma = enc.find(',', pos);
+        std::string tok = enc.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+        if (!tok.empty() || comma != std::string::npos)
+            result.push_back(static_cast<size_t>(std::stoull(tok)));
+        if (comma == std::string::npos) break;
+        pos = comma + 1;
+    }
+    return result;
+}
+
+int Client::ManualCompact(int min_sstables, int from_level, bool cascade) {
+    if (sock_ == kInvalidSocket) return 0;
+
+    unsigned char req = Protocol::kManualCompactReq;
+    if (!SendAll(sock_, &req, 1)) return 0;
+    if (!SendUint32(sock_, static_cast<uint32_t>(min_sstables))) return 0;
+    if (!SendUint32(sock_, static_cast<uint32_t>(from_level))) return 0;
+    uint8_t cas = cascade ? 1 : 0;
+    if (!SendAll(sock_, &cas, 1)) return 0;
+
+    unsigned char resp;
+    if (!RecvAll(sock_, &resp, 1) || resp != Protocol::kValueResp) return 0;
+
+    std::string enc;
+    if (!RecvString(sock_, enc)) return 0;
+
+    return static_cast<int>(std::stoull(enc));
+}
+
 } // namespace kvdb

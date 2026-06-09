@@ -28,6 +28,8 @@ struct Protocol {
     static const uint8_t kCompareAndSwapReq = 'Z';
     static const uint8_t kAsyncWriteReq  = 'w';
     static const uint8_t kAsyncDeleteReq = 'd';
+    static const uint8_t kLevelCountsReq   = 'L';
+    static const uint8_t kManualCompactReq = 'M';
     static const uint8_t kOkResp        = 'O';
     static const uint8_t kValueResp     = 'V';
     static const uint8_t kNotFoundResp  = 'N';

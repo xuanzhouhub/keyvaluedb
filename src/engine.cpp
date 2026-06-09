@@ -155,7 +155,9 @@ void LSMTreeEngine::CompactionWorkerLoop() {
         }
 
         try {
-            CompactLevel(trigger, top);
+            std::unique_lock<std::mutex> lock(compaction_mutex_, std::try_to_lock);
+            if (lock.owns_lock())
+                CompactLevel(trigger, top);
         } catch (...) {}
         DrainFileGC();
     }
@@ -566,6 +568,63 @@ size_t LSMTreeEngine::SSTableCount() const {
 std::vector<SSTable::Metadata> LSMTreeEngine::GetSSTableMetadata() const {
     auto snap = SnapSSTableMetadata();
     return snap ? *snap : std::vector<SSTable::Metadata>{};
+}
+
+std::vector<size_t> LSMTreeEngine::LevelCounts() const {
+    auto snap = SnapSSTableMetadata();
+    std::vector<size_t> counts(Config::kMaxLevel + 1, 0);
+    if (!snap) return counts;
+    for (auto& m : *snap) {
+        int lvl = m.level;
+        if (lvl >= 0 && lvl <= static_cast<int>(Config::kMaxLevel))
+            counts[static_cast<size_t>(lvl)]++;
+    }
+    return counts;
+}
+
+int LSMTreeEngine::ManualCompact(int min_sstables, int from_level, bool cascade) {
+    if (min_sstables < 2) return 0;
+    if (from_level < 0 || from_level > static_cast<int>(Config::kMaxLevel)) return 0;
+
+    std::unique_lock<std::mutex> lock(compaction_mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) return 0;
+
+    auto snap = SnapSSTableMetadata();
+    if (!snap) return 0;
+
+    std::vector<size_t> counts(Config::kMaxLevel + 1, 0);
+    for (auto& m : *snap) {
+        int lvl = m.level;
+        if (lvl >= 0 && lvl <= static_cast<int>(Config::kMaxLevel))
+            counts[static_cast<size_t>(lvl)]++;
+    }
+
+    int trigger = -1;
+    for (int lvl = from_level; lvl <= static_cast<int>(Config::kMaxLevel); ++lvl) {
+        if (counts[static_cast<size_t>(lvl)] >= static_cast<size_t>(min_sstables)) {
+            trigger = lvl;
+            break;
+        }
+    }
+    if (trigger < 0) return 0;
+
+    int top = trigger;
+    if (cascade) {
+        for (int lvl = trigger + 1; lvl <= static_cast<int>(Config::kMaxLevel); ++lvl) {
+            if (counts[static_cast<size_t>(lvl)] >= static_cast<size_t>(min_sstables))
+                top = lvl;
+            else
+                break;
+        }
+    }
+
+    try {
+        CompactLevel(trigger, top);
+    } catch (...) { return 0; }
+
+    int levels_done = top - trigger + 1;
+    DrainFileGC();
+    return levels_done;
 }
 
 bool LSMTreeEngine::HasWALData() const {

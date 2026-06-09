@@ -428,6 +428,31 @@ void Server::HandleClient(socket_t client_sock) {
             unsigned char end = Protocol::kEndResp;
             SendAll(client_sock, &end, 1);
 
+        } else if (req_type == Protocol::kLevelCountsReq) {
+            auto counts = engine_.LevelCounts();
+            unsigned char resp = Protocol::kValueResp;
+            if (!SendAll(client_sock, &resp, 1)) break;
+            std::string enc;
+            for (size_t i = 0; i < counts.size(); ++i) {
+                if (i > 0) enc += ',';
+                enc += std::to_string(counts[i]);
+            }
+            if (!SendString(client_sock, enc)) break;
+
+        } else if (req_type == Protocol::kManualCompactReq) {
+            uint32_t min_sst = 0, from_lv = 0;
+            uint8_t  cascade = 0;
+            if (!RecvUint32(client_sock, min_sst)) break;
+            if (!RecvUint32(client_sock, from_lv)) break;
+            if (!RecvAll(client_sock, &cascade, 1)) break;
+            int compacted = engine_.ManualCompact(
+                static_cast<int>(min_sst),
+                static_cast<int>(from_lv),
+                cascade != 0);
+            unsigned char resp = Protocol::kValueResp;
+            if (!SendAll(client_sock, &resp, 1)) break;
+            if (!SendString(client_sock, std::to_string(compacted))) break;
+
         } else {
             break;
         }

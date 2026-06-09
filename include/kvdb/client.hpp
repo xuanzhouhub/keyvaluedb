@@ -40,6 +40,10 @@ public:
                         const std::string& expected,
                         const std::string& desired);
 
+    std::vector<size_t> LevelCounts();
+    int ManualCompact(int min_sstables = 2, int from_level = 0,
+                      bool cascade = true);
+
 private:
     socket_t sock_ = kInvalidSocket;
 };

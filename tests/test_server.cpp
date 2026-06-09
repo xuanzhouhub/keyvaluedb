@@ -298,6 +298,7 @@ void TestClientRangeScanExclusive();
 void TestClientCompareAndSwap();
 void TestClientCASFail();
 void TestClientCASOnNewKey();
+void TestClientManualCompact();
 
 void RunTests() {
     std::cout << "Running Server Tests...\n\n";
@@ -315,6 +316,7 @@ void RunTests() {
     TestClientCompareAndSwap();
     TestClientCASFail();
     TestClientCASOnNewKey();
+    TestClientManualCompact();
 }
 
 void TestClientCompareAndSwap() {
@@ -377,6 +379,41 @@ void TestClientCASOnNewKey() {
 
         std::string v;
         ASSERT_FALSE(c.Read("newkey", v));
+
+        c.Disconnect();
+        server.Stop();
+    }
+    Cleanup();
+}
+
+void TestClientManualCompact() {
+    Cleanup();
+    {
+        kvdb::LSMTreeEngine engine(kTestDir, 256 * 1024);
+        kvdb::Server server(engine, kTestPort);
+        server.Start();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        kvdb::Client c;
+        ASSERT_TRUE(c.Connect("127.0.0.1", kTestPort));
+        std::string v(512, 'x');
+        for (int i = 0; i < 15000; ++i) {
+            char buf[32]; std::snprintf(buf, sizeof(buf), "k%08d", i);
+            c.WriteAsync(buf, v);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        engine.Flush(); engine.WaitForPendingFlushes();
+
+        auto before = c.LevelCounts();
+        ASSERT_TRUE(before.size() > 0);
+        ASSERT_TRUE(before[0] >= 8);
+
+        int compacted = c.ManualCompact(4, 0, true);
+        ASSERT_TRUE(compacted > 0);
+
+        auto after = c.LevelCounts();
+        ASSERT_TRUE(after.size() > 0);
+        ASSERT_TRUE(after[1] > 0);
 
         c.Disconnect();
         server.Stop();

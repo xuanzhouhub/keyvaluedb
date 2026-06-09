@@ -54,6 +54,10 @@ size_t count = engine.ActiveMemTableEntryCount();
 size_t sst  = engine.SSTableCount();
 auto meta   = engine.GetSSTableMetadata();
 bool full   = engine.NeedsFlush();
+auto levels = engine.LevelCounts();      // vector<size_t> — per-level SSTable counts
+int done    = engine.ManualCompact(4, 0, true);  // threshold, from_level, cascade
+// ManualCompact returns number of levels compacted, 0 if no level qualifies
+// or threshold < 2 or another compaction is in progress (serialized via try_lock)
 ```
 
 ## `KeyValuePair`
@@ -283,6 +287,10 @@ bool ok = client.CommitBatch();   // or client.AbortBatch();
 
 // Compare-and-swap
 bool swapped = client.CompareAndSwap("key", "expected", "desired");
+
+// Compaction management
+auto levels = client.LevelCounts();        // vector<size_t> — per-level SSTable counts
+int done    = client.ManualCompact(4, 0, true);  // threshold, from_lvl, cascade
 
 client.Disconnect();
 ```

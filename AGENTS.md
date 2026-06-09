@@ -93,7 +93,12 @@
 - **Tombstones**: `Delete(key)` inserts an entry with empty value (tombstone). Tombstones survive flushes; `Lookup` returns false for tombstone entries.
 - **Leveling strategy**: Level 0 (flushes, can overlap). Levels 1+ (non-overlapping sorted runs). Threshold: 8 SSTables triggers compaction.
 - **Size multiplier**: 10× per level. Base SSTable size: 4MB. SSTables split when approaching level max size.
-- **Background worker**: `CompactionWorkerLoop` periodically scans levels. Compaction merges SSTables from level L into L+1, picks newest version per key, drops tombstones at the last level.
+- **Background worker**: `CompactionWorkerLoop` periodically scans levels (2s interval). Compaction merges SSTables from level L into L+1, picks newest version per key, drops tombstones at the last level.
+- **Manual compaction**:
+  - `LevelCounts() → vector<size_t>` — per-level SSTable count snapshot (L0=N, L1=M, ...)
+  - `ManualCompact(min_sstables=2, from_level=0, cascade=true) → int` — scans from `from_level` upward, compacts the first level with ≥ `min_sstables`. If `cascade`, continues through adjacent qualifying levels. Returns number of levels compacted, or 0 if no level qualifies / threshold < 2 / another compaction is in progress.
+  - Serialized by `compaction_mutex_` with `try_lock` — at most one compaction runs at a time. Contending callers (including the background worker) are rejected immediately (return 0 / skip cycle).
+  - Exposed via client protocol: `L` (LevelCounts) → `V`+CSV string, `M` (ManualCompact) → `V`+count string.
 - **Visibility**: New SSTables are written, manifest is updated atomically (remove old, add new). Old SSTable files are **deferred-GC'd** (not deleted immediately).
 - **Concurrency**: Compaction uses `sstable_metadata_mutex_` for atomic swap. Flush worker writes to Level 0 concurrently.
 - **Cache during compaction**: Iterators created with `populate=false` (1-arg constructor with `reader_=nullptr`) — compaction does not pollute the LRU cache.
@@ -130,6 +135,8 @@
 - **WriterLoop**: polls `write_queue_cv_` with `kWALIdleSyncUs` timeout. Drains ALL normal requests per iteration. Calls `engine_.Insert/Delete` (returns immediately), pushes to `pending_writes_`, resolves promises via `checkAndFulfill()` which polls `SyncedSequence()`. `checkAndFulfill()` runs at top of every loop iteration — even idle.
 - **Batch commit (server)**: `HandleClient` sets `batch_commit_requested_` (wakes Writer) and `batch_commit_pending_` (blocks client). Writer picks up via `batch_commit_requested_`, calls `CommitBatchAsync()`, sets `commit_finalizing_`, clears `batch_commit_requested_`. `checkAndFulfill()` calls `CommitBatchFinalize()` when synced, clears `batch_commit_pending_`, notifies client handler. The two flags prevent the Writer `wait_for` predicate from busy-spinning while waiting for sync.
 - Binary protocol: `W + key + value` (sync write), `w + key + value` (async write), `D + key` (sync delete), `d + key` (async delete), `R + key` (read), `O/V/N/E` (responses).
+- `L` (LevelCounts): no payload, returns `V` + comma-separated per-level SSTable counts. `M + min_sst:4B + from_level:4B + cascade:1B` (ManualCompact): returns `V` + compacted-levels string.
+- Client API: `LevelCounts() → vector<size_t>`, `ManualCompact(min_sstables, from_level, cascade) → int`.
 - Async writes respond OK immediately after enqueue (no persistence wait). Queue backpressure still applies via `write_queue_not_full_cv_`.
 - **CAS**: synchronous. Writer defers conflicting requests to `deferred_requests_`. Drain loop bounded by `kMaxCasDeferred` (64): stop draining and re-check CAS after 64 non-conflicting requests or when `deferred_requests_` hits the cap. CAS Lookup runs on `std::async` thread; Writer poll-spins (microseconds) until ready.
 - Byte-capped write queue (16MB) with CV-based backpressure.
@@ -137,6 +144,8 @@
 
 ### Tests
 - 10 test suites: `test_memtable`, `test_sstable`, `test_engine`, `test_wal`, `test_manifest`, `test_server`, `test_wfw`, `test_small`, `test_restart`, `test_flat_cache`.
+- `test_engine`: includes `TestLevelCounts`, `TestManualCompactEngine`, `TestManualCompactRejectsLowThreshold`, `TestManualCompactConcurrentReject`.
+- `test_server`: includes `TestClientManualCompact` (end-to-end via client protocol).
 - Separate fuzz test (`test_fuzz`, `-DKVDB_BUILD_FUZZ=ON`): 32 threads, fault injection, persistence verification.
 - All suites pass (10/10, 100%).
 

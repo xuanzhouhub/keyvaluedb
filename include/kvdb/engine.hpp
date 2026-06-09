@@ -69,6 +69,10 @@ public:
 
     std::vector<SSTable::Metadata> GetSSTableMetadata() const;
 
+    std::vector<size_t> LevelCounts() const;
+
+    int ManualCompact(int min_sstables = 2, int from_level = 0, bool cascade = true);
+
     bool HasWALData() const;
 
     void TrimWAL();
@@ -145,6 +149,7 @@ private:
     std::unique_ptr<EngineSyncState> sync_;
     std::unique_ptr<FlushState> flush_;
     std::unique_ptr<CompactionState> compaction_;
+    std::mutex compaction_mutex_;
     mutable std::unique_ptr<KVCache> kv_cache_;
     std::unique_ptr<BlockReader> sst_cache_;
 

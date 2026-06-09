@@ -2,6 +2,7 @@
 #include "kvdb/engine.hpp"
 #include "kvdb/config.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
@@ -917,6 +918,87 @@ void TestBatchCrashRecoverEmptyBatch() {
     std::filesystem::remove_all("./test_batch_data9");
 }
 
+void TestLevelCounts() {
+    std::filesystem::remove_all("./test_level_counts");
+    {
+        kvdb::LSMTreeEngine engine("./test_level_counts", 256 * 1024);
+        std::string v(512, 'x');
+        for (int i = 0; i < 20000; ++i) {
+            char buf[32]; std::snprintf(buf, sizeof(buf), "k%08d", i);
+            engine.Insert(buf, v);
+        }
+        engine.Flush(); engine.WaitForPendingFlushes();
+
+        auto counts = engine.LevelCounts();
+        ASSERT_TRUE(counts.size() > 0);
+        ASSERT_TRUE(counts[0] > 0);
+    }
+    std::filesystem::remove_all("./test_level_counts");
+}
+
+void TestManualCompactEngine() {
+    std::filesystem::remove_all("./test_manual_cp");
+    {
+        kvdb::LSMTreeEngine engine("./test_manual_cp", 256 * 1024);
+        std::string v(512, 'x');
+        for (int i = 0; i < 20000; ++i) {
+            char buf[32]; std::snprintf(buf, sizeof(buf), "k%08d", i);
+            engine.Insert(buf, v);
+        }
+        engine.Flush(); engine.WaitForPendingFlushes();
+
+        auto before = engine.LevelCounts();
+        ASSERT_TRUE(before[0] >= 8);
+
+        int compacted = engine.ManualCompact(4, 0, true);
+        ASSERT_TRUE(compacted > 0);
+
+        auto after = engine.LevelCounts();
+        ASSERT_TRUE(after[1] > 0);
+    }
+    std::filesystem::remove_all("./test_manual_cp");
+}
+
+void TestManualCompactRejectsLowThreshold() {
+    std::filesystem::remove_all("./test_mc_low");
+    {
+        kvdb::LSMTreeEngine engine("./test_mc_low", 256 * 1024);
+        std::string v(512, 'x');
+        for (int i = 0; i < 5000; ++i) {
+            char buf[32]; std::snprintf(buf, sizeof(buf), "k%08d", i);
+            engine.Insert(buf, v);
+        }
+        engine.Flush(); engine.WaitForPendingFlushes();
+
+        ASSERT_EQ(0, engine.ManualCompact(1, 0, false));
+        ASSERT_EQ(0, engine.ManualCompact(0, 0, false));
+        ASSERT_EQ(0, engine.ManualCompact(-1, 0, false));
+    }
+    std::filesystem::remove_all("./test_mc_low");
+}
+
+void TestManualCompactConcurrentReject() {
+    std::filesystem::remove_all("./test_mc_concurrent");
+    {
+        kvdb::LSMTreeEngine engine("./test_mc_concurrent", 256 * 1024);
+        std::string v(512, 'x');
+        for (int i = 0; i < 20000; ++i) {
+            char buf[32]; std::snprintf(buf, sizeof(buf), "k%08d", i);
+            engine.Insert(buf, v);
+        }
+        engine.Flush(); engine.WaitForPendingFlushes();
+
+        std::atomic<int> success{0}, rejected{0};
+        std::thread t1([&]() { if (engine.ManualCompact(4, 0, true) > 0) success++; else rejected++; });
+        std::thread t2([&]() { if (engine.ManualCompact(4, 0, true) > 0) success++; else rejected++; });
+        t1.join(); t2.join();
+
+        ASSERT_EQ(1, success.load());
+        ASSERT_EQ(1, rejected.load());
+    }
+    std::filesystem::remove_all("./test_mc_concurrent");
+}
+
 void RunTests() {
     std::cout << "Running LSMTreeEngine Tests...\n\n";
 
@@ -962,6 +1044,10 @@ void RunTests() {
     TestBatchAbortRecovery();
     TestBatchCrashRecoverAutoAbort();
     TestBatchCrashRecoverEmptyBatch();
+    TestLevelCounts();
+    TestManualCompactEngine();
+    TestManualCompactRejectsLowThreshold();
+    TestManualCompactConcurrentReject();
 }
 
 } // namespace kvdb_test
