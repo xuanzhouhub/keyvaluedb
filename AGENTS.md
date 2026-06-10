@@ -56,7 +56,7 @@
 - **Compression**: `kCompressionNone` active (Snappy compiled but disabled by default).
 - **Entry format**: `[KeyLen:4B][Key][ValueLen:4B][Value][Timestamp:8B][Flags:1B]` — bit 0 = tombstone (`fl&1`).
 - **ReadMetadata**: Bulk-read I/O (2 file reads: header + filter area). CRC32 over filter area for integrity. Flat buffer for block_first_keys — stored as single contiguous string `[len:2][key]...`, eliminating 3,449 individual string allocations per read.
-- **LookupKey warm path**: Reads `CachedHeavy` directly from cache via shared_ptr — no data copies. Bloom filter check before block index scan. Block index scan uses sequential pass over flat buffer.
+- **LookupKey warm path**: Reads `CachedHeavy` directly from cache via shared_ptr — no data copies. Bloom filter check before block index scan. Block index scan uses sequential pass over flat buffer. `CachedHeavy.aborted_batch_ts` provides abort filtering without cache miss.
 
 ### Metadata
 - `SSTable::Metadata` includes `manifest_seq` (uint64_t). Uses flat buffer `block_first_key_buf` instead of `vector<string>`. Access via `FirstKey(i)`, `FirstKeyCount()`, `FirstKeyView(i)`.
@@ -70,6 +70,7 @@
   - `kWALMinSyncBytes = 4MB` — throughput: buffer must reach this for non-forced sync.
   - `timeBeginPeriod(1)` called at server startup for ~1ms timer resolution on Windows.
 - **Batch Write**: `StartBatch()` reserves 1M timestamps. `BatchInsert`/`BatchDelete` buffer in WAL, return seq immediately (same as Insert). `CommitBatch()` polls `synced_seq` atomically (no CV wait). `CommitBatchAsync()` buffers commit sentinel + notifies sync; `CommitBatchFinalize()` idempotently swaps `global_ts_` when `synced_seq >= commit_seq`. Server uses Async+Finalize for non-blocking batch commit.
+- **Batch Abort**: `AbortBatch()` writes WAL abort sentinel → MANIFEST abort record (`[CRC32][0x03][batch_ts:8B][fence_seq:8B]`) → adds `batch_ts` to memtable + SSTable metadata. Crash-unfinished batches are auto-aborted on recovery. Three persistence layers: WAL (primary, survives crash), MANIFEST (survives TrimWAL), SSTable file metadata (permanent, written by next flush). `Manifest::Compact()` at startup drops dead SSTable records + stale abort records whose pre-abort files are all gone.
 - Per-entry CRC32. `Recover(checkpoint_ts)` — reads from last checkpoint, returns entries after it.
 - `WriteCheckpoint(ts)` — sentinel record `[CRC32][0xFFFFFFFF][ts:8B]`.
 - `TrimToLastCheckpoint()` — truncates WAL before last checkpoint.
@@ -93,7 +94,7 @@
 - **Tombstones**: `Delete(key)` inserts an entry with empty value (tombstone). Tombstones survive flushes; `Lookup` returns false for tombstone entries.
 - **Leveling strategy**: Level 0 (flushes, can overlap). Levels 1+ (non-overlapping sorted runs). Threshold: 8 SSTables triggers compaction.
 - **Size multiplier**: 10× per level. Base SSTable size: 4MB. SSTables split when approaching level max size.
-- **Background worker**: `CompactionWorkerLoop` periodically scans levels (2s interval). Compaction merges SSTables from level L into L+1, picks newest version per key, drops tombstones at the last level.
+- **Background worker**: `CompactionWorkerLoop` periodically scans levels (2s interval). Compaction merges SSTables from level L into L+1, picks newest version per key, drops tombstones at the last level. Aborted batch entries are filtered during merge via `aborted_batch_ts`. Abort timestamps propagate into output SSTables and are dropped only at the bottom level when all aborted entries are physically removed.
 - **Manual compaction**:
   - `LevelCounts() → vector<size_t>` — per-level SSTable count snapshot (L0=N, L1=M, ...)
   - `ManualCompact(min_sstables=2, from_level=0, cascade=true) → int` — scans from `from_level` upward, compacts the first level with ≥ `min_sstables`. If `cascade`, continues through adjacent qualifying levels. Returns number of levels compacted, or 0 if no level qualifies / threshold < 2 / another compaction is in progress.
@@ -107,7 +108,7 @@
 - **KV Cache** (`kv_cache.hpp`): Flat-array, open-addressing, intrusive-LRU shard design. LRU key-value cache for point lookups. Write-through (populated after WAL sync). Tombstones erase cache entries. Blobs (> 2KB) are not cached. Default: 10K entries / 16MB.
 - **FlatCache** (`internal/flat_cache.hpp`): Reusable template `FlatCache<Key, Value, Hash, KeyEqual, SizeBytes>` — flat entry array, open-addressing hash table with tombstone support, intrusive doubly-linked LRU, per-shard mutex. No per-node heap allocations. Stores `shared_ptr<const Value>`, returns `shared_ptr` on Get (no data copies). Values tracked by customizable SizeBytes callable. Used as underlying implementation for SSTable Block Cache.
 - **SSTable Block Cache** (`block_cache.hpp`): Uses `FlatCache` for both heavy metadata and data blocks.
-  - `BlockReader` (`block_reader.hpp`) — pure virtual interface: `GetHeavy(seq)` returns `shared_ptr<const CachedHeavy>` (bloom + offsets + first_key_buf), `PutHeavy(seq, bloom, offsets, buf)`, `GetBlock`, `PutBlock`, `Invalidate`.
+  - `BlockReader` (`block_reader.hpp`) — pure virtual interface: `GetHeavy(seq)` returns `shared_ptr<const CachedHeavy>` (bloom + offsets + first_key_buf + aborted_batch_ts), `PutHeavy(seq, bloom, offsets, buf, aborted)`, `GetBlock`, `PutBlock`, `Invalidate`.
   - `SSTableCache` implements `BlockReader`. Default: 1024 blocks / 256 metadata / 64MB, 16 shards.
   - **Cache keys**: `uint64_t manifest_seq` (not filepath). Block keys: `BlockKey(seq, idx) = (seq << 32) | idx`.
   - `Invalidate(seq)` erases heavy entry, does `EraseIf` on blocks for the seq range.
@@ -129,6 +130,7 @@
 - **SeekToKey**: `SSTableIterator` uses **block-index binary search** on `block_first_key_buf`, then jumps to the target block via `file.seekg(block_offsets[target])`. Linear scan within the target block only. Setup cost: ~29 us (was 1,300 us with entry-level linear scan). Iteration: ~950 ns/entry.
 - `SSTableIterator` constructors accept optional `block_offsets` and `block_first_key_buf` pointers for indexed seek. Engine RangeScan, Compaction, and LevelIterator pass these from snapshotted metadata.
 - Concurrent range scans served directly on client threads, scale near-linearly with thread count.
+- **Abort filtering**: `MaterializedMemTableSource` filters aborted entries via `aborted_` pointer to the memtable's aborted timestamp set. `SSTableIterator` filters via `aborted_` pointer from metadata snapshot.
 
 ### Server/Client
 - TCP server: connection-per-client threads, single writer queue, concurrent reads via MVCC.

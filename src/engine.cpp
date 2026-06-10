@@ -175,6 +175,7 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
     manifest_ = std::make_unique<Manifest>(manifest_path);
 
     auto recovered_meta = manifest_->Recover();
+    manifest_->Compact();
     sstable_seq_ = recovered_meta.size();
 
     auto recovered_ptr = std::make_shared<std::vector<SSTable::Metadata>>(std::move(recovered_meta));
@@ -979,7 +980,7 @@ bool LSMTreeEngine::AbortBatch() {
         wal_->BufferAbort(batch_ts_);
         wal_->Sync(true);
 
-        manifest_->AddAbortBatch(batch_ts_);
+        manifest_->AddAbortBatch(batch_ts_, sstable_seq_.load());
 
         {
             std::unique_lock<std::shared_mutex> mlock(memtable_mutex_);

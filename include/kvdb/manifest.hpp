@@ -25,11 +25,13 @@ public:
 
     void RemoveSSTable(uint64_t seq);
 
-    void AddAbortBatch(uint64_t batch_ts);
+    void AddAbortBatch(uint64_t batch_ts, uint64_t fence_seq);
 
     void Sync();
 
     std::vector<SSTable::Metadata> Recover();
+
+    void Compact();
 
 private:
     void WriteRecord(uint8_t type, const std::vector<char>& payload);

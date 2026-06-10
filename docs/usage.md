@@ -170,6 +170,46 @@ if (ok) {
 - If `CommitBatch` fails or the server crashes before fsync, no batch
   entries are visible on recovery
 
+### Batch Abort
+
+```cpp
+// Abort an active batch — discard all buffered writes
+client.StartBatch();
+client.BatchPut("k1", "v1");
+client.BatchPut("k2", "v2");
+client.AbortBatch();  // k1, k2 are discarded and will never be visible
+
+// Verify abort filtered
+std::string v;
+assert(!client.Read("k1", v));  // not found
+```
+
+```cpp
+// Engine-direct abort
+engine.StartBatch();
+engine.BatchInsert("key", "val");
+engine.AbortBatch();
+// Aborted entries are filtered at every read layer:
+//   - MemTable point lookup
+//   - SSTable point lookup (cold cache + warm cache)
+//   - Range scan (memtable + SSTable)
+//   - Compaction merge
+```
+
+**Abort durability:** the abort is persisted in three places:
+
+| Layer | When written | Survives |
+|-------|-------------|----------|
+| WAL | During `AbortBatch()` | Survives crash, but removed by `TrimWAL` after checkpoint |
+| MANIFEST | During `AbortBatch()` | Independent of WAL — survives `TrimWAL` and all checkpoints |
+| SSTable file | Next flush/compaction | Permanently embedded in file metadata |
+
+On recovery, MANIFEST abort records are replayed into every SSTable's in-memory metadata. WAL abort sentinels prevent aborted entries from being re-inserted during WAL replay.
+
+**MANIFEST compact:** on every startup, the MANIFEST file is compacted — dead SSTable records and stale abort records (whose pre-abort files have all been compacted away) are dropped. This prevents the MANIFEST from growing without bound.
+
+**Crash abort:** if the server crashes mid-batch (no explicit `AbortBatch`), recovery automatically aborts the incomplete batch — entries are marked invisible and filtered on all subsequent reads.
+
 ### Compare-And-Swap
 
 ```cpp

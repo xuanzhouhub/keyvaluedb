@@ -111,9 +111,8 @@ void TestRemoveSSTable() {
     {
         kvdb::Manifest m(kManifestPath);
         auto results = m.Recover();
-        ASSERT_EQ(2u, results.size());
+        ASSERT_EQ(1u, results.size());
         ASSERT_STREQ("sstable_keep.sst", results[0].filepath);
-        ASSERT_STREQ("sstable_remove.sst", results[1].filepath);
     }
     Cleanup();
 }
@@ -129,6 +128,88 @@ void TestEmptyManifestRecoverFromNonexistent() {
     fs::remove_all("./test_manifest_nonexist");
 }
 
+void TestCompactRemovesDeadSSTables() {
+    fs::remove_all("./test_mnfst_compact1");
+    fs::create_directories("./test_mnfst_compact1");
+    {
+        kvdb::Manifest m("./test_mnfst_compact1/MANIFEST");
+
+        kvdb::SSTable::Metadata meta;
+        meta.filepath = "keep.sst"; meta.entry_count = 10;
+        meta.file_size = 100; meta.level = 0;
+        m.AddSSTable(1, meta);
+
+        meta.filepath = "dead.sst"; meta.entry_count = 20;
+        m.AddSSTable(2, meta);
+        m.RemoveSSTable(2);
+
+        meta.filepath = "alive.sst"; meta.entry_count = 30;
+        m.AddSSTable(3, meta);
+
+        m.Compact();
+    }
+    {
+        kvdb::Manifest m("./test_mnfst_compact1/MANIFEST");
+        auto results = m.Recover();
+        ASSERT_EQ(2u, results.size());
+        ASSERT_STREQ("keep.sst", results[0].filepath);
+        ASSERT_STREQ("alive.sst", results[1].filepath);
+    }
+    fs::remove_all("./test_mnfst_compact1");
+}
+
+void TestCompactRetainsNeededAbort() {
+    fs::remove_all("./test_mnfst_compact2");
+    fs::create_directories("./test_mnfst_compact2");
+    {
+        kvdb::Manifest m("./test_mnfst_compact2/MANIFEST");
+
+        kvdb::SSTable::Metadata meta;
+        meta.filepath = "pre.sst"; meta.entry_count = 10;
+        meta.file_size = 100; meta.level = 0;
+        meta.manifest_seq = 0;
+        m.AddSSTable(0, meta);
+
+        m.AddAbortBatch(42, 10);
+
+        m.Compact();
+    }
+    {
+        kvdb::Manifest m("./test_mnfst_compact2/MANIFEST");
+        auto results = m.Recover();
+        ASSERT_EQ(1u, results.size());
+        ASSERT_STREQ("pre.sst", results[0].filepath);
+        ASSERT_TRUE(results[0].aborted_batch_ts.count(42) > 0);
+    }
+    fs::remove_all("./test_mnfst_compact2");
+}
+
+void TestCompactDropsStaleAbort() {
+    fs::remove_all("./test_mnfst_compact3");
+    fs::create_directories("./test_mnfst_compact3");
+    {
+        kvdb::Manifest m("./test_mnfst_compact3/MANIFEST");
+
+        kvdb::SSTable::Metadata meta;
+        meta.filepath = "post.sst"; meta.entry_count = 10;
+        meta.file_size = 100; meta.level = 0;
+        meta.manifest_seq = 100;
+        m.AddSSTable(100, meta);
+
+        m.AddAbortBatch(77, 50);
+
+        m.Compact();
+    }
+    {
+        kvdb::Manifest m("./test_mnfst_compact3/MANIFEST");
+        auto results = m.Recover();
+        ASSERT_EQ(1u, results.size());
+        ASSERT_STREQ("post.sst", results[0].filepath);
+        ASSERT_TRUE(results[0].aborted_batch_ts.count(77) == 0);
+    }
+    fs::remove_all("./test_mnfst_compact3");
+}
+
 void RunTests() {
     std::cout << "Running Manifest Tests...\n\n";
 
@@ -137,6 +218,9 @@ void RunTests() {
     TestEmptyManifest();
     TestRemoveSSTable();
     TestEmptyManifestRecoverFromNonexistent();
+    TestCompactRemovesDeadSSTables();
+    TestCompactRetainsNeededAbort();
+    TestCompactDropsStaleAbort();
 }
 
 } // namespace kvdb_test
