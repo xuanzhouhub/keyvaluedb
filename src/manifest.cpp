@@ -79,6 +79,7 @@ bool ReadUint64LE(FILE* f, uint64_t& out) {
 
 const uint8_t kTypeAddSSTable    = 0x01;
 const uint8_t kTypeRemoveSSTable = 0x02;
+const uint8_t kTypeAbortBatch    = 0x03;
 
 } // anonymous namespace
 
@@ -140,6 +141,12 @@ void Manifest::RemoveSSTable(uint64_t seq) {
     WriteRecord(kTypeRemoveSSTable, payload);
 }
 
+void Manifest::AddAbortBatch(uint64_t batch_ts) {
+    std::vector<char> payload;
+    WriteUint64LE(payload, batch_ts);
+    WriteRecord(kTypeAbortBatch, payload);
+}
+
 void Manifest::Sync() {
     std::lock_guard<std::mutex> lock(mutex_);
     FsyncFile(file_);
@@ -148,6 +155,7 @@ void Manifest::Sync() {
 std::vector<SSTable::Metadata> Manifest::Recover() {
     std::vector<SSTable::Metadata> results;
     std::vector<uint64_t> removed_seqs;
+    std::vector<uint64_t> aborted_batches;
 
     std::fclose(file_);
     file_ = nullptr;
@@ -246,12 +254,36 @@ std::vector<SSTable::Metadata> Manifest::Recover() {
             }
 
             removed_seqs.push_back(seq);
+        } else if (type == kTypeAbortBatch) {
+            long body_start = std::ftell(infile) - 1;
+
+            uint64_t batch_ts;
+            if (!ReadUint64LE(infile, batch_ts)) break;
+
+            long body_end = std::ftell(infile);
+            long body_len = body_end - body_start;
+
+            std::fseek(infile, body_start, SEEK_SET);
+            std::vector<char> body(body_len);
+            if (std::fread(body.data(), 1, body_len, infile) != static_cast<size_t>(body_len)) break;
+
+            CRC32 crc;
+            crc.Update(body.data(), body.size());
+            if (crc.Finalize() != checksum) {
+                break;
+            }
+
+            aborted_batches.push_back(batch_ts);
         } else {
             break;
         }
     }
 
     std::fclose(infile);
+
+    for (uint64_t ts : aborted_batches)
+        for (auto& meta : results)
+            meta.aborted_batch_ts.insert(ts);
 
     file_ = std::fopen(filepath_.c_str(), "ab");
     if (!file_) {

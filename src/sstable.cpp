@@ -285,6 +285,7 @@ SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
             meta.bloom = heavy->bloom;
             meta.block_offsets = heavy->block_offsets;
             meta.block_first_key_buf = heavy->block_first_key_buf;
+            meta.aborted_batch_ts = heavy->aborted_batch_ts;
             meta.min_key_len = UINT32_MAX; meta.max_key_len = 0;
             const char* p = meta.block_first_key_buf.data();
             const char* end = p + meta.block_first_key_buf.size();
@@ -366,7 +367,8 @@ SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
     }
 
     if (cache) {
-        cache->PutHeavy(manifest_seq, meta.bloom, meta.block_offsets, meta.block_first_key_buf);
+        cache->PutHeavy(manifest_seq, meta.bloom, meta.block_offsets,
+                        meta.block_first_key_buf, meta.aborted_batch_ts);
     }
     return meta;
 }
@@ -410,6 +412,7 @@ bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
         bloom = &heavy->bloom;
         offsets = &heavy->block_offsets;
         first_key_buf = &heavy->block_first_key_buf;
+        aborted = &heavy->aborted_batch_ts;
     } else {
         meta_fallback = ReadMetadata(filepath, cache, manifest_seq);
         bloom = &meta_fallback.bloom;

@@ -688,7 +688,8 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
             }
         }
         if (!first_copy) return nullptr;
-        auto src = std::make_unique<MaterializedMemTableSource>(memtable, first_copy);
+        auto src = std::make_unique<MaterializedMemTableSource>(memtable, first_copy,
+            &memtable->GetTree().AbortedBatches());
         if (!lower.IsUnbounded()) src->SeekToKey(lower.key);
         if (src->Valid()) return src;
         return nullptr;
@@ -977,6 +978,8 @@ bool LSMTreeEngine::AbortBatch() {
     if (batch_touched_) {
         wal_->BufferAbort(batch_ts_);
         wal_->Sync(true);
+
+        manifest_->AddAbortBatch(batch_ts_);
 
         {
             std::unique_lock<std::shared_mutex> mlock(memtable_mutex_);

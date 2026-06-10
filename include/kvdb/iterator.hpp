@@ -54,12 +54,14 @@ struct MaterializedMemTableSource : SourceIterator {
     BPlusTree::LeafPage* leaf_      = nullptr;
     uint32_t pos_                   = 0;
     KeyValuePair current_;
+    const std::unordered_set<uint64_t>* aborted_ = nullptr;
 
     MaterializedMemTableSource() = default;
 
     MaterializedMemTableSource(std::shared_ptr<MemTable> memtable,
-                               BPlusTree::LeafPage* first)
-        : ref(std::move(memtable)), first_leaf_(first), leaf_(first) {
+                               BPlusTree::LeafPage* first,
+                               const std::unordered_set<uint64_t>* aborted = nullptr)
+        : ref(std::move(memtable)), first_leaf_(first), leaf_(first), aborted_(aborted) {
         while (leaf_ && leaf_->count == 0) leaf_ = leaf_->next;
         if (leaf_) Load();
     }
@@ -109,6 +111,10 @@ struct MaterializedMemTableSource : SourceIterator {
 
 private:
     void Load() {
+        while (leaf_ && pos_ < leaf_->count) {
+            if (aborted_ && aborted_->count(leaf_->Timestamp(pos_))) { ++pos_; continue; }
+            break;
+        }
         if (!leaf_ || pos_ >= leaf_->count) return;
         current_.key.assign(leaf_->Rec(pos_), leaf_->KeyLen(pos_));
         uint16_t vl = leaf_->ValLen(pos_);
