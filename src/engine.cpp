@@ -137,17 +137,10 @@ void LSMTreeEngine::CompactionWorkerLoop() {
                 counts[static_cast<size_t>(lvl)]++;
         }
 
-        int trigger = -1;
-        for (int lvl = 0; lvl <= static_cast<int>(Config::kMaxLevel); ++lvl) {
-            if (counts[static_cast<size_t>(lvl)] >= Config::kDefaultCompactionThreshold) {
-                trigger = lvl;
-                break;
-            }
-        }
-        if (trigger < 0) { DrainFileGC(); continue; }
+        if (counts[0] < Config::kDefaultCompactionThreshold) { DrainFileGC(); continue; }
 
-        int top = trigger;
-        for (int lvl = trigger + 1; lvl <= static_cast<int>(Config::kMaxLevel); ++lvl) {
+        int top = 0;
+        for (int lvl = 1; lvl <= static_cast<int>(Config::kMaxLevel); ++lvl) {
             if (counts[static_cast<size_t>(lvl)] >= Config::kDefaultCompactionThreshold)
                 top = lvl;
             else
@@ -157,7 +150,7 @@ void LSMTreeEngine::CompactionWorkerLoop() {
         try {
             std::unique_lock<std::mutex> lock(compaction_mutex_, std::try_to_lock);
             if (lock.owns_lock())
-                CompactLevel(trigger, top);
+                CompactLevel(0, top);
         } catch (...) {}
         DrainFileGC();
     }

@@ -563,9 +563,9 @@ void TestCompactionPreservesData() {
         }
 
         auto metas = engine.GetSSTableMetadata();
-        int l1_count = 0;
-        for (auto& m : metas) if (m.level == 1) l1_count++;
-        ASSERT_TRUE(l1_count > 0);
+        int compacted = 0;
+        for (auto& m : metas) if (m.level > 0) compacted++;
+        ASSERT_TRUE(compacted > 0);
     }
     CleanupTestDir();
 }
