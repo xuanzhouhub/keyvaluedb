@@ -14,7 +14,7 @@ It consumed 6 billion tokens of DeepSeek V4 Pro, costing around 260 RMB.
 
 The Agent did make tons of logical mistakes and misjudgments. But this is manageable as long as the developer has in-depth knowledge about how the system should work.
 
-Here are the main prompts used in the development. 
+[Here](Prompts.md) are the main prompts used in the development. 
 
 ## Build
 
