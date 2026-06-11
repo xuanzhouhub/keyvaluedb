@@ -1,5 +1,9 @@
 # KVDB — LSM-Tree Key-Value Storage Engine
 
+[![CI](https://github.com/xuanzhouhub/keyvaluedb/actions/workflows/ci.yml/badge.svg)](https://github.com/xuanzhouhub/keyvaluedb/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.cppreference.com/w/cpp/17)
+
 A from-scratch C++17 implementation of a log-structured merge-tree (LSM-tree) key-value database engine with MVCC, WAL, B+-tree memtable, SSTable v4, TCP server/client, and range scans.
 
 ## Build

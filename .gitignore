@@ -1,24 +1,14 @@
-# Build artifacts
 build/
-Testing/
+bw_*/
+bench_*/
+dbg_*.log
 *.exe
-*.ilk
 *.obj
-*.pdb
 *.lib
+*.pdb
+*.ilk
 *.exp
-*.suo
-
-# IDE
+*.sln
+*.vcxproj*
 .vs/
-.idea/
-*/clang/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Test data
-test_eng_data/
-test_hang_data/
-test_sstable_data/
+CMakeUserPresets.json
