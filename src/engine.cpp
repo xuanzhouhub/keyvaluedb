@@ -709,7 +709,8 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
         }
     }
 
-    // ── Release read_ts from tracker now that memtable data is materialized ──
+    // ── Transition to SSTable tracker, release memtable tracker ──
+    tracker_sst_.Acquire(read_ts);
     tracker_.Release(read_ts);
 
     if (snap && !snap->empty()) {
@@ -742,6 +743,7 @@ RangeIterator LSMTreeEngine::RangeScan(const RangeBound& lower, const RangeBound
     }
     }
 
+    tracker_sst_.Release(read_ts);
     return RangeIterator(std::move(sources), read_ts, guard, lower, upper);
 }
 
