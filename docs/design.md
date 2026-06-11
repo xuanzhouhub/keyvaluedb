@@ -378,21 +378,21 @@ When a reader skips an aborted entry, it naturally finds the **next older commit
 Lookup(key):
   1. kv_cache_->Get(key, read_ts, value_out)      ← KV cache (fast path)
   2. read_ts = global_ts_.load()                  ← atomic
-  3. SnapshotTracker::Acquire(read_ts)            ← internal mutex
+  3. tracker_::Acquire(read_ts)                   ← EBR: memtable phase
   4. Lock B: shared_lock<shared_mutex>
-       search active_memtable_                    ← read-only, concurrent with other readers
+       search active_memtable_
        search frozen_memtables_ (newest first)
      Unlock B
-  5. Lock D: copy sstable_metadata_
+  5. tracker_::Release(read_ts)
+     tracker_sst_::Acquire(read_ts)               ← EBR done; file GC: SSTable phase
+  6. Lock D: copy sstable_metadata_
      Unlock D
-  6. For each SSTable (newest first, L0 then L1+ binary search):
-       skip if source_table_id already scanned (from frozen memtables)
-       skip via range filter (min_key / max_key)
-       skip via bloom filter
+  7. For each SSTable (newest first, L0 then L1+ binary search):
+       skip via range / bloom filters
        SSTable::LookupKey(filepath, key, read_ts, sst_cache_, manifest_seq)
-         → BlockReader cache: read-through bloom + blocks
-  7. Tombstone: if found and empty value → return false
-  8. SnapshotTracker::Release(read_ts)
+         → BlockReader cache + block-index binary search (O(log N))
+  8. Tombstone: if found and empty value → return false
+  9. tracker_sst_::Release(read_ts)
 ```
 
 Readers never block writers (shared_lock vs unique_lock on B). They never block the flush worker either. SSTable file reads are lock-free with respect to engine state.
@@ -443,7 +443,7 @@ The flush worker holds no locks during disk I/O (`DoFlush`). It only takes B bri
 6. Lock D: swap `sstable_metadata_` (remove old, add new)
 7. MANIFEST: `RemoveSSTable` for old, `AddSSTable` for new, fsync
 8. **DeferFileGC**: invalidate cache for old manifest_seq, push `{filepath, seq, fence_ts}` to `pending_gc_`
-9. **DrainFileGC**: called on every compaction worker iteration (and at engine destructor). When `MinActiveTS() >= fence_ts`, delete the file from disk.
+9. **DrainFileGC**: called on every compaction worker iteration (and at engine destructor). When `min(tracker_, tracker_sst_) >= fence_ts`, delete the file from disk. Uses both trackers — a reader still scanning SSTables must prevent old file deletion.
 
 **Leveling strategy**:
 - L0: SSTables from flushes, can overlap, no size limit per file
@@ -501,7 +501,7 @@ Called from:
 - `CompactionWorkerLoop`: every 2s iteration (ensures deferred files drain even without new compactions)
 - `~LSMTreeEngine`: final cleanup (all readers gone → all entries drain)
 
-The `fence_ts` is set after the manifest swap. New readers will see the new metadata and open new files. When `MinActiveTS() >= fence_ts`, no reader that started before the swap is still active — old file handles are all released, so files can be safely deleted.
+The `fence_ts` is set after the manifest swap. New readers will see the new metadata and open new files. When `min(tracker_, tracker_sst_) >= fence_ts`, no reader that started before the swap is still active — old file handles are all released, so files can be safely deleted.
 
 ### Lock Acquisition Summary
 
@@ -534,7 +534,7 @@ The `fence_ts` is set after the manifest swap. New readers will see the new meta
 5. **Checkpoint-after-flush**: the flush worker writes `WriteCheckpoint` only after `Manifest::AddSSTable` is fsync'd. After recovery, the SSTable is visible and the checkpoint guarantees WAL truncation is safe.
 6. **L1+ non-overlapping**: SSTables from compaction are globally sorted output → no key-range overlap within a level. `LevelIterator` relies on this to chain files sequentially.
 7. **Tombstone removal only at last level**: tombstones propagate downward through compactions and are dropped only when merged into `kMaxLevel`, since no deeper level could hold an older version.
-8. **Compaction visibility**: new SSTables become visible to readers only after the atomic `sstable_metadata_` swap. Old files are deleted only after all pre-swap readers release their snapshots (`MinActiveTS() >= fence_ts`).
+8. **Compaction visibility**: new SSTables become visible to readers only after the atomic `sstable_metadata_` swap. Old files are deleted only after all pre-swap readers release their snapshots (`min(tracker_, tracker_sst_) >= fence_ts`).
 9. **Cache key stability**: cache entries are keyed by `manifest_seq` (monotonic, immutable across manifest operations) rather than filepath. Filepath-based keys would be fragile across compaction file swapping.
 10. **Compaction cache isolation**: compaction uses the 1-arg `SSTableIterator` constructor (`reader_=nullptr`), which skips all cache operations. Compaction I/O never evicts user-hot blocks from the LRU cache.
 11. **Batch write timestamps**: assigned at `StartBatch()` time — `batch_ts = global_ts + gap`. All batch writes share this timestamp. Reads naturally skip batch entries (read_ts < batch_ts) until `CommitBatch()` jumps `global_ts` past it. *(Previous design of assigning timestamp at commit time was abandoned in favor of start-time assignment, which avoids timestamp indirection in WAL/SSTable records.)*

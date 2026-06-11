@@ -8,6 +8,12 @@ All public API in the `kvdb` namespace.
 #include <kvdb/engine.hpp>
 
 kvdb::LSMTreeEngine engine("./data", 4*1024*1024);
+// Full form with custom block cache sizes:
+// kvdb::LSMTreeEngine engine(data_dir, memtable_max_bytes, max_pending_flushes,
+//                            kv_cache_shards, block_cache_shards, batch_increment_gap,
+//                            block_cache_blocks, block_cache_meta, block_cache_bytes);
+//
+// block_cache_meta default: 512 (256 minimum recommended for LSM-tree workloads)
 
 // Write (non-blocking, returns WAL seq for tracking persistence)
 uint64_t seq = engine.Insert("key", "value");      // returns immediately (~1 us)
@@ -314,7 +320,7 @@ Config::kCompressionNone            // 0
 Config::kDefaultKVMaxEntries        // 10000
 Config::kDefaultKVMaxBytes          // 16 MB
 Config::kDefaultBlockCacheBlocks    // 1024
-Config::kDefaultBlockCacheMeta      // 256
+Config::kDefaultBlockCacheMeta      // 512
 Config::kDefaultBlockCacheBytes     // 64 MB
 Config::kDefaultCompactionThreshold // 8
 Config::kMaxLevel                   // 3

@@ -42,6 +42,7 @@
 
 ### Concurrency
 - **SnapshotTracker**: lock-free 256-slot CAS array with random probe, mutex fallback + `fallback_used_` flag.
+- **Dual Tracker**: two trackers — `tracker_` (memtable) and `tracker_sst_` (SSTable). `Lookup` releases `tracker_` after the memtable scan, acquires `tracker_sst_` for the SSTable phase. EBR drain (`DrainRetired`) checks only `tracker_` — unblocked as soon as readers leave the memtable. File GC (`DrainFileGC`) checks `min(tracker_, tracker_sst_)` — safe because SSTable files must survive active SSTable-phase readers.
 - **memtable_mutex_**: `shared_mutex` — readers briefly copy pointers, tree traversal fully outside lock. Writer lock fires only on freeze+swap (~once per 16MB).
 - **sstable_metadata_mutex_**: `shared_mutex` — concurrent readers share; compaction swap takes exclusive briefly.
 - **EBR drain**: engine-driven `DrainRetired(MinActiveTS())` after each Insert, progressive under read load.
