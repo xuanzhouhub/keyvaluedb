@@ -148,6 +148,7 @@ private:
     std::unique_ptr<Manifest> manifest_;
 
     mutable SnapshotTracker tracker_;
+    mutable SnapshotTracker tracker_sst_;
 
     std::unique_ptr<EngineSyncState> sync_;
     std::unique_ptr<FlushState> flush_;

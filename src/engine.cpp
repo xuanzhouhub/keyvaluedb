@@ -429,7 +429,8 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
         SnapshotTracker& t;
         uint64_t ts;
         ~Guard() { t.Release(ts); }
-    } guard{tracker_, read_ts};
+    };
+    Guard guard_mt{tracker_, read_ts};
 
     std::string found_val;
     uint64_t found_ts = 0;
@@ -456,6 +457,11 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
             }
         }
     }
+
+    // Release memtable tracker, acquire SSTable tracker
+    tracker_.Release(read_ts);
+    tracker_sst_.Acquire(read_ts);
+    Guard guard_sst{tracker_sst_, read_ts};
 
     if (!hit) {
         uint64_t scanned_ids[4]; int scanned_n = 0;
@@ -829,7 +835,7 @@ void LSMTreeEngine::DrainFileGC() {
         auto& pg = pending_gc_;
         pg.erase(
             std::remove_if(pg.begin(), pg.end(), [&](const PendingFileGC& p) {
-                if (tracker_.MinActiveTS() >= p.fence_ts) {
+                if (std::min(tracker_.MinActiveTS(), tracker_sst_.MinActiveTS()) >= p.fence_ts) {
                     ready.push_back(std::move(p));
                     return true;
                 }
