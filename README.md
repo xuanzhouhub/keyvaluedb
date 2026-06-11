@@ -4,7 +4,17 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://en.cppreference.com/w/cpp/17)
 
-A from-scratch C++17 implementation of a log-structured merge-tree (LSM-tree) key-value database engine with MVCC, WAL, B+-tree memtable, SSTable v4, TCP server/client, and range scans.
+This is a log-structured merge-tree (LSM-tree) key-value database engine developed from scratch by Xuan Zhou using OpenCode V1.17 and DeepSeek V4 Pro. It is a fully functional engine with MVCC, WAL, Lock free B+-tree memtable, SSTable v4, TCP server/client, range scans, prioritized batch writes and atomic compare-and-swap. C++17 is used for the implementation. It is fast.
+
+## On AI Coding 
+
+The author didn't write a single line of code. Neither did he review any block of Code in detail. He just communicated with the Agent (OpenCode V1.17 + DeepSeek V4 Pro) to finish the project.
+
+It consumed 6 billion tokens of DeepSeek V4 Pro, costing around 260 RMB.
+
+The Agent did make tons of logical mistakes and misjudgments. But this is manageable as long as the developer has in-depth knowledge about how the system should work.
+
+Here are the main prompts used in the development. 
 
 ## Build
 
