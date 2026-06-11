@@ -1,7 +1,9 @@
 build/
-bw_*/
-bench_*/
-dbg_*.log
+bw*/
+bench*
+dbg*.log
+Testing/
+test_engine_data/
 *.exe
 *.obj
 *.lib
@@ -12,3 +14,4 @@ dbg_*.log
 *.vcxproj*
 .vs/
 CMakeUserPresets.json
+tests/tmp_bench.cpp
