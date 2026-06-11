@@ -109,10 +109,11 @@
 - **FlatCache** (`internal/flat_cache.hpp`): Reusable template `FlatCache<Key, Value, Hash, KeyEqual, SizeBytes>` — flat entry array, open-addressing hash table with tombstone support, intrusive doubly-linked LRU, per-shard mutex. No per-node heap allocations. Stores `shared_ptr<const Value>`, returns `shared_ptr` on Get (no data copies). Values tracked by customizable SizeBytes callable. Used as underlying implementation for SSTable Block Cache.
 - **SSTable Block Cache** (`block_cache.hpp`): Uses `FlatCache` for both heavy metadata and data blocks.
   - `BlockReader` (`block_reader.hpp`) — pure virtual interface: `GetHeavy(seq)` returns `shared_ptr<const CachedHeavy>` (bloom + offsets + first_key_buf + aborted_batch_ts), `PutHeavy(seq, bloom, offsets, buf, aborted)`, `GetBlock`, `PutBlock`, `Invalidate`.
-  - `SSTableCache` implements `BlockReader`. Default: 1024 blocks / 256 metadata / 64MB, 16 shards.
+  - `SSTableCache` implements `BlockReader`. Default: 1024 blocks / 512 metadata / 64MB, 16 shards. Configurable via engine constructor.
   - **Cache keys**: `uint64_t manifest_seq` (not filepath). Block keys: `BlockKey(seq, idx) = (seq << 32) | idx`.
   - `Invalidate(seq)` erases heavy entry, does `EraseIf` on blocks for the seq range.
   - Block data also cached on disk read path in `LookupKey` (via `PutBlock` after disk read).
+- **Block index binary search**: `first_key_offsets` precomputed at `ReadMetadata` time and cached in `CachedHeavy`. `LookupKey` uses O(log N) binary search instead of O(N) sequential scan. Speeds up L2 reads from 27µs → 17µs.
 - **Cache populates during**: flush (`WriteFromWalk`), point lookup (`LookupKey`), range scan. NOT during compaction (`populate=false`).
 - **Warm path**: `ReadMetadata` returns cached data via single `GetHeavy` call (no copies). `LookupKey` reads `CachedHeavy` directly from cache via `shared_ptr`, avoiding all data copies.
 

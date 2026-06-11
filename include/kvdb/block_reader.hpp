@@ -14,6 +14,7 @@ struct CachedHeavy {
     BloomFilter bloom;
     std::vector<uint64_t> block_offsets;
     std::string block_first_key_buf;
+    std::vector<uint32_t> first_key_offsets;
     std::unordered_set<uint64_t> aborted_batch_ts;
 };
 
@@ -26,6 +27,7 @@ public:
                           BloomFilter bloom,
                           std::vector<uint64_t> offsets,
                           std::string first_key_buf,
+                          std::vector<uint32_t> first_key_offsets,
                           const std::unordered_set<uint64_t>& aborted) = 0;
 
     virtual std::shared_ptr<const std::string> GetBlock(

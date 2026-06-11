@@ -33,7 +33,10 @@ public:
                            size_t max_pending_flushes = Config::kDefaultMaxPendingFlushes,
                            size_t kv_cache_shards = Config::kDefaultKVCacheShards,
                            size_t block_cache_shards = Config::kDefaultBlockCacheShards,
-                           uint64_t batch_increment_gap = Config::kDefaultBatchIncrementGap);
+                           uint64_t batch_increment_gap = Config::kDefaultBatchIncrementGap,
+                           size_t block_cache_blocks = Config::kDefaultBlockCacheBlocks,
+                           size_t block_cache_meta  = Config::kDefaultBlockCacheMeta,
+                           size_t block_cache_bytes = Config::kDefaultBlockCacheBytes);
 
     ~LSMTreeEngine();
 

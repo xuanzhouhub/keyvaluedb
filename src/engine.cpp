@@ -156,7 +156,7 @@ void LSMTreeEngine::CompactionWorkerLoop() {
     }
 }
 
-LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_bytes, size_t max_pending_flushes, size_t kv_cache_shards, size_t block_cache_shards, uint64_t batch_increment_gap)
+LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_bytes, size_t max_pending_flushes, size_t kv_cache_shards, size_t block_cache_shards, uint64_t batch_increment_gap, size_t block_cache_blocks, size_t block_cache_meta, size_t block_cache_bytes)
     : data_dir_(data_dir)
     , memtable_max_bytes_(memtable_max_bytes)
     , max_pending_flushes_(max_pending_flushes)
@@ -182,6 +182,7 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
                     meta.bloom = std::move(full.bloom);
                     meta.block_offsets = std::move(full.block_offsets);
                     meta.block_first_key_buf = std::move(full.block_first_key_buf);
+                    meta.first_key_offsets = std::move(full.first_key_offsets);
                     meta.aborted_batch_ts = std::move(full.aborted_batch_ts);
                 } catch (...) {}
             }
@@ -209,10 +210,7 @@ LSMTreeEngine::LSMTreeEngine(const std::string& data_dir, size_t memtable_max_by
                                             Config::kDefaultKVMaxBytes,
                                             kv_cache_shards);
     sst_cache_ = std::make_unique<SSTableCache>(
-        Config::kDefaultBlockCacheBlocks,
-        Config::kDefaultBlockCacheMeta,
-        Config::kDefaultBlockCacheBytes,
-        block_cache_shards);
+        block_cache_blocks, block_cache_meta, block_cache_bytes, block_cache_shards);
 }
 
 LSMTreeEngine::~LSMTreeEngine() {

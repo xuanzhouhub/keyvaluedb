@@ -15,7 +15,7 @@ namespace {
 struct NullBlockReader : kvdb::BlockReader {
     std::shared_ptr<const kvdb::CachedHeavy> GetHeavy(uint64_t) override { return nullptr; }
     void PutHeavy(uint64_t, kvdb::BloomFilter, std::vector<uint64_t>, std::string,
-                  const std::unordered_set<uint64_t>&) override {}
+                  std::vector<uint32_t>, const std::unordered_set<uint64_t>&) override {}
     std::shared_ptr<const std::string> GetBlock(uint64_t, uint32_t) override { return nullptr; }
     void PutBlock(uint64_t, uint32_t, std::string) override {}
     void Invalidate(uint64_t) override {}
@@ -537,7 +537,7 @@ void TestCacheBloomOffsets() {
     first_key_buf.push_back('\x01'); first_key_buf.push_back('\0'); first_key_buf += "a";
     first_key_buf.push_back('\x01'); first_key_buf.push_back('\0'); first_key_buf += "m";
     first_key_buf.push_back('\x01'); first_key_buf.push_back('\0'); first_key_buf += "z";
-    cache.PutHeavy(seq, bf, offsets, first_key_buf, {});
+    cache.PutHeavy(seq, bf, offsets, first_key_buf, {}, {});
 
     auto heavy = cache.GetHeavy(seq);
     ASSERT_TRUE(heavy != nullptr);
@@ -605,10 +605,10 @@ void TestCacheUpdate() {
     ASSERT_TRUE(sp != nullptr);
     ASSERT_TRUE(*sp == "new");
 
-    cache.PutHeavy(5, kvdb::BloomFilter(10, 0.01), std::vector<uint64_t>{}, std::string{}, {});
+    cache.PutHeavy(5, kvdb::BloomFilter(10, 0.01), std::vector<uint64_t>{}, std::string{}, {}, {});
     kvdb::BloomFilter bf2(100, 0.01);
     bf2.Add("test");
-    cache.PutHeavy(5, bf2, std::vector<uint64_t>{}, std::string{}, {});
+    cache.PutHeavy(5, bf2, std::vector<uint64_t>{}, std::string{}, {}, {});
 
     auto heavy = cache.GetHeavy(5);
     ASSERT_TRUE(heavy != nullptr);

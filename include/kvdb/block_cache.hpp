@@ -27,11 +27,13 @@ public:
     void PutHeavy(uint64_t seq, BloomFilter bloom,
                   std::vector<uint64_t> offsets,
                   std::string first_key_buf,
+                  std::vector<uint32_t> first_key_offsets,
                   const std::unordered_set<uint64_t>& aborted) override {
         auto sp = std::make_shared<CachedHeavy>();
         sp->bloom = std::move(bloom);
         sp->block_offsets = std::move(offsets);
         sp->block_first_key_buf = std::move(first_key_buf);
+        sp->first_key_offsets = std::move(first_key_offsets);
         sp->aborted_batch_ts = aborted;
         heavy_.Put(seq, sp);
     }
@@ -64,6 +66,7 @@ private:
             return h.bloom.Data().size() * sizeof(uint8_t)
                  + h.block_offsets.size() * sizeof(uint64_t)
                  + h.block_first_key_buf.size()
+                 + h.first_key_offsets.size() * sizeof(uint32_t)
                  + h.aborted_batch_ts.size() * sizeof(uint64_t);
         }
     };

@@ -50,7 +50,7 @@ struct Config {
     static constexpr size_t kDefaultKVMaxEntries      = 10000;
     static constexpr size_t kDefaultKVMaxBytes        = 16 * 1024 * 1024;
     static constexpr size_t kDefaultBlockCacheBlocks  = 1024;
-    static constexpr size_t kDefaultBlockCacheMeta    = 256;
+    static constexpr size_t kDefaultBlockCacheMeta    = 512;
     static constexpr size_t kDefaultBlockCacheBytes   = 64 * 1024 * 1024;
     static constexpr uint64_t kDefaultBatchIncrementGap = 1'000'000;
     static constexpr size_t kDefaultMiniBatchSize  = 1000;

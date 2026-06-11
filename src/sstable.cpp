@@ -285,6 +285,7 @@ SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
             meta.bloom = heavy->bloom;
             meta.block_offsets = heavy->block_offsets;
             meta.block_first_key_buf = heavy->block_first_key_buf;
+            meta.first_key_offsets = heavy->first_key_offsets;
             meta.aborted_batch_ts = heavy->aborted_batch_ts;
             meta.min_key_len = UINT32_MAX; meta.max_key_len = 0;
             const char* p = meta.block_first_key_buf.data();
@@ -348,7 +349,9 @@ SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
     }
     const char* fk_start = p;
     meta.min_key_len = UINT32_MAX; meta.max_key_len = 0;
+    meta.first_key_offsets.reserve(bc);
     for (uint32_t i = 0; i < bc; ++i) {
+        meta.first_key_offsets.push_back(static_cast<uint32_t>(p - fk_start));
         uint16_t kl = static_cast<uint16_t>(uint8_t(p[0])|(uint8_t(p[1])<<8)); p += 2;
         if (kl < meta.min_key_len) meta.min_key_len = kl;
         if (kl > meta.max_key_len) meta.max_key_len = kl;
@@ -368,7 +371,7 @@ SSTable::Metadata SSTable::ReadMetadata(const std::string& filepath,
 
     if (cache) {
         cache->PutHeavy(manifest_seq, meta.bloom, meta.block_offsets,
-                        meta.block_first_key_buf, meta.aborted_batch_ts);
+                        meta.block_first_key_buf, meta.first_key_offsets, meta.aborted_batch_ts);
     }
     return meta;
 }
@@ -441,7 +444,21 @@ bool SSTable::LookupKey(const std::string& filepath, const std::string& key,
     };
 
     uint32_t target = 0;
-    {
+    const std::vector<uint32_t>* koff = (heavy ? &heavy->first_key_offsets : nullptr);
+    if (koff && koff->empty()) koff = nullptr;
+    if (!koff) { koff = &meta_fallback.first_key_offsets; if (koff->empty()) koff = nullptr; }
+    if (koff && !koff->empty()) {
+        uint32_t lo = 0, hi = static_cast<uint32_t>(koff->size());
+        const char* fp = first_key_buf->data();
+        while (lo < hi) {
+            uint32_t mid = (lo + hi) / 2;
+            const char* p = fp + (*koff)[mid];
+            uint16_t kl = static_cast<uint16_t>(static_cast<uint8_t>(p[0]) | (static_cast<uint8_t>(p[1]) << 8));
+            if (key.compare(0, std::string::npos, p + 2, kl) < 0) hi = mid;
+            else lo = mid + 1;
+        }
+        target = lo > 0 ? lo - 1 : 0;
+    } else {
         const char* fp = first_key_buf->data();
         const char* fe = fp + first_key_buf->size();
         while (fp < fe) {
