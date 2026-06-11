@@ -458,9 +458,9 @@ bool LSMTreeEngine::Lookup(const std::string& key, std::string& value_out) const
         }
     }
 
-    // Release memtable tracker, acquire SSTable tracker
-    tracker_.Release(read_ts);
+    // Transition: acquire SSTable tracker before releasing memtable tracker
     tracker_sst_.Acquire(read_ts);
+    tracker_.Release(read_ts);
     Guard guard_sst{tracker_sst_, read_ts};
 
     if (!hit) {
